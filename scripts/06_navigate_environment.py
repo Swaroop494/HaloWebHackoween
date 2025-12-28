@@ -8,45 +8,42 @@ import sys
 import time
 import math
 
-# Add parent directory to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from scripts.diff_drive_robot import DiffDriveRobot
-# Import environment builder using importlib since filename starts with number
+# Dynamic import for module with numeric name
 import importlib.util
-env_builder_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-                                "scripts", "05_environment_builder.py")
-spec = importlib.util.spec_from_file_location("environment_builder", env_builder_path)
+spec = importlib.util.spec_from_file_location("env_builder", 
+    os.path.join(os.path.dirname(__file__), "05_environment_builder.py"))
 env_builder_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(env_builder_module)
 EnvironmentBuilder = env_builder_module.EnvironmentBuilder
 
-class NavigationController:
-    """Advanced navigation controller with obstacle avoidance."""
+from scripts.diff_drive_robot import DiffDriveRobot
+
+class PIDNavigationController:
+    """Simple PID-based navigation controller with obstacle avoidance."""
     
     def __init__(self, goal_threshold=0.4):
         self.goal_threshold = goal_threshold
-        self.kp_linear = 0.8
-        self.kp_angular = 2.5
+        
+        # PID gains for goal navigation
+        self.kp_linear = 1.0
+        self.kp_angular = 2.0
+        self.ki_angular = 0.0  # Can add integral term if needed
+        self.kd_angular = 0.5  # Derivative term for smoother turns
+        
+        # Velocity limits
         self.max_linear_vel = 0.5
         self.max_angular_vel = 2.0
         
-        # Obstacle avoidance parameters
-        self.safety_distance = 0.5  # Reduced for more aggressive navigation
-        self.critical_distance = 0.35  # Very close - back up and turn
-        self.obstacle_repulsion = 1.5
-        self.min_turn_distance = 0.3
+        # Obstacle avoidance
+        self.safety_distance = 0.6
+        self.critical_distance = 0.4
         
-        # State memory to prevent oscillation
-        self.last_turn_direction = 0  # -1 for left, 1 for right, 0 for none
-        self.stuck_counter = 0
-        self.last_position = None
-        self.stuck_threshold = 0.08  # Consider stuck if moved less than this
-        self.position_history = []
-    
+        # PID state
+        self.last_heading_error = 0.0
+        
     def compute_control(self, robot_pose, goal, lidar_scan):
         """
-        Compute velocity commands with obstacle avoidance.
+        Simple PID controller with obstacle avoidance.
         
         Args:
             robot_pose: [x, y, theta] current pose
@@ -69,142 +66,82 @@ class NavigationController:
         heading_error = desired_heading - robot_pose[2]
         heading_error = np.arctan2(np.sin(heading_error), np.cos(heading_error))
         
-        # Obstacle avoidance using lidar
+        # Obstacle avoidance - modify desired heading if obstacle detected
         min_lidar = np.min(lidar_scan)
         num_rays = len(lidar_scan)
         
-        # Find obstacles in front and sides
-        front_obstacle = False
-        left_obstacle = False
-        right_obstacle = False
+        # Find obstacles in front (within 90 degrees)
+        front_obstacle_dist = 5.0  # Max range
+        front_obstacle_angle = 0.0
         
         for i, dist in enumerate(lidar_scan):
             if dist < self.safety_distance:
                 # Ray angle relative to robot heading
                 ray_angle = (2*np.pi * i / num_rays)
                 ray_angle_rel = ray_angle - np.pi  # -pi to pi, 0 is front
-                
-                # Normalize to -pi to pi
                 ray_angle_rel = np.arctan2(np.sin(ray_angle_rel), np.cos(ray_angle_rel))
                 
-                # Check front (within 60 degrees)
-                if abs(ray_angle_rel) < np.pi/3:
-                    front_obstacle = True
-                # Check left
-                elif ray_angle_rel > np.pi/6 and ray_angle_rel < np.pi/2:
-                    left_obstacle = True
-                # Check right
-                elif ray_angle_rel < -np.pi/6 and ray_angle_rel > -np.pi/2:
-                    right_obstacle = True
+                # Check front (within 90 degrees)
+                if abs(ray_angle_rel) < np.pi/2:
+                    if dist < front_obstacle_dist:
+                        front_obstacle_dist = dist
+                        front_obstacle_angle = ray_angle_rel
         
-        # Check if robot is stuck (oscillating) - only check if very close to obstacle
-        # Don't trigger stuck detection if robot is making progress
-        if min_lidar < self.safety_distance:
-            current_pos = np.array([robot_pose[0], robot_pose[1]])
-            self.position_history.append(current_pos)
-            if len(self.position_history) > 30:
-                self.position_history.pop(0)
+        # Modify heading if obstacle in front
+        if front_obstacle_dist < self.safety_distance:
+            # Calculate avoidance direction
+            # Find direction with most space
+            left_space = np.mean(lidar_scan[:num_rays//2])
+            right_space = np.mean(lidar_scan[num_rays//2:])
             
-            if len(self.position_history) >= 15:
-                # Check if robot has moved significantly
-                recent_positions = np.array(self.position_history[-15:])
-                movement = np.max(np.linalg.norm(recent_positions - recent_positions[0], axis=1))
-                if movement < self.stuck_threshold:
-                    self.stuck_counter += 1
-                    # Only trigger if stuck for multiple checks
-                    if self.stuck_counter > 3:
-                        # When stuck, commit to a direction and turn more aggressively
-                        if self.last_turn_direction == 0:
-                            # Choose initial direction based on space
-                            left_space = np.mean(lidar_scan[:num_rays//2])
-                            right_space = np.mean(lidar_scan[num_rays//2:])
-                            self.last_turn_direction = -1 if left_space > right_space else 1
-                        
-                        # Turn in committed direction while moving forward slightly
-                        v = 0.15
-                        w = self.last_turn_direction * self.max_angular_vel * 0.9
-                        return v, w, False
-                else:
-                    self.stuck_counter = 0
-                    self.last_turn_direction = 0  # Reset when moving
-            else:
-                self.stuck_counter = 0
-        else:
-            # Clear history when not near obstacles
-            self.position_history = []
-            self.stuck_counter = 0
-            self.last_turn_direction = 0
-        
-        # Find direction with most space (for obstacle avoidance)
-        left_space = np.mean(lidar_scan[:num_rays//2])
-        right_space = np.mean(lidar_scan[num_rays//2:])
-        space_diff = left_space - right_space
-        
-        # Check for critical obstacle (very close)
-        if min_lidar < self.critical_distance:
-            # Very close - turn away while backing up slightly
-            v = -0.1  # Small reverse
-            
+            # Calculate avoidance angle (turn away from obstacle)
             if left_space > right_space:
-                w = -self.max_angular_vel * 0.8  # Turn left
-                self.last_turn_direction = -1
+                # More space on left, turn left
+                avoidance_angle = np.pi/2  # 90 degrees left
             else:
-                w = self.max_angular_vel * 0.8   # Turn right
-                self.last_turn_direction = 1
-        elif front_obstacle:
-            # Obstacle in front - turn away while moving forward slowly
-            # Don't stop completely, keep some forward motion
-            v = 0.25  # Reduced but still moving
+                # More space on right, turn right
+                avoidance_angle = -np.pi/2  # 90 degrees right
             
-            # Use state memory to prevent oscillation
-            if abs(space_diff) < 0.2:  # Similar space on both sides
-                # Use last turn direction to maintain consistency
-                if self.last_turn_direction == 0:
-                    self.last_turn_direction = -1 if left_space > right_space else 1
-                w = self.last_turn_direction * self.max_angular_vel * 0.6
-            else:
-                # Clear preference - turn toward more space
-                if left_space > right_space:
-                    w = -self.max_angular_vel * 0.6
-                    self.last_turn_direction = -1
-                else:
-                    w = self.max_angular_vel * 0.6
-                    self.last_turn_direction = 1
-        else:
-            # No immediate obstacle - navigate to goal
-            v = min(self.max_linear_vel, self.kp_linear * distance_to_goal)
-            w = np.clip(self.kp_angular * heading_error, -self.max_angular_vel, self.max_angular_vel)
+            # Blend goal heading with avoidance heading
+            # Weight based on obstacle proximity
+            obstacle_weight = (self.safety_distance - front_obstacle_dist) / self.safety_distance
+            obstacle_weight = min(1.0, obstacle_weight * 1.5)  # Scale up for more aggressive avoidance
             
-            # Reset turn direction memory when clear path
-            if min_lidar > self.safety_distance * 1.5:
-                self.last_turn_direction = 0
-            
-            # Proactive obstacle avoidance - start turning before hitting obstacle
-            if min_lidar < self.safety_distance * 1.2:
-                # Blend goal heading with obstacle avoidance
-                avoidance_weight = (self.safety_distance * 1.2 - min_lidar) / (self.safety_distance * 1.2)
-                
-                # Calculate avoidance heading
-                if space_diff > 0.1:
-                    avoidance_heading = robot_pose[2] + np.pi/3  # Turn left
-                elif space_diff < -0.1:
-                    avoidance_heading = robot_pose[2] - np.pi/3  # Turn right
-                else:
-                    avoidance_heading = robot_pose[2] + self.last_turn_direction * np.pi/4
-                
-                avoidance_error = avoidance_heading - robot_pose[2]
-                avoidance_error = np.arctan2(np.sin(avoidance_error), np.cos(avoidance_error))
-                
-                # Blend goal heading and avoidance heading
-                w = (1 - avoidance_weight) * w + avoidance_weight * (self.kp_angular * avoidance_error)
-                w = np.clip(w, -self.max_angular_vel, self.max_angular_vel)
-                
-                # Reduce speed when avoiding
-                v *= max(0.4, 1.0 - avoidance_weight * 0.5)
-            
-            # Slow down when turning sharply
-            if abs(heading_error) > 0.5:
-                v *= 0.7  # Less aggressive slowdown
+            # Modify desired heading
+            desired_heading = desired_heading + obstacle_weight * avoidance_angle
+            heading_error = desired_heading - robot_pose[2]
+            heading_error = np.arctan2(np.sin(heading_error), np.cos(heading_error))
+        
+        # PID control for angular velocity
+        # Proportional term
+        p_term = self.kp_angular * heading_error
+        
+        # Derivative term (rate of change of error)
+        d_error = heading_error - self.last_heading_error
+        d_term = self.kd_angular * d_error
+        
+        # Angular velocity command
+        w = p_term + d_term
+        w = np.clip(w, -self.max_angular_vel, self.max_angular_vel)
+        
+        # Update for next iteration
+        self.last_heading_error = heading_error
+        
+        # Linear velocity - proportional to distance, reduced when turning or near obstacles
+        v = self.kp_linear * distance_to_goal
+        v = min(v, self.max_linear_vel)
+        
+        # Reduce speed when turning sharply
+        if abs(heading_error) > np.pi/4:  # More than 45 degrees
+            v *= 0.6
+        
+        # Reduce speed when obstacle is close
+        if min_lidar < self.safety_distance:
+            v *= max(0.3, min_lidar / self.safety_distance)
+        
+        # Very close to obstacle - slow down more
+        if min_lidar < self.critical_distance:
+            v *= 0.2
         
         return v, w, False
 
@@ -293,47 +230,52 @@ def main():
     try:
         while step < max_steps and not goal_reached:
             # Get robot state
-            pose = robot.get_pose()
-            lidar = robot.get_lidar_scan()
-            imu_data = robot.get_imu_data()
-            odom_data = robot.get_odometry()
+            try:
+                pose = robot.get_pose()
+                lidar = robot.get_lidar_scan()
+                imu_data = robot.get_imu_data()
+                odom_data = robot.get_odometry()
+            except:
+                # Robot may have been deleted, skip this iteration
+                continue
             
             # Update camera view to robot's perspective for sensor panels
             # This feeds the RGB/Depth/Segmentation panels in the GUI
-            pos, orn = p.getBasePositionAndOrientation(robot.robot_id)
-            
-            # Calculate camera position behind and above robot
-            rot_matrix = p.getMatrixFromQuaternion(orn)
-            rot_matrix = np.array(rot_matrix).reshape(3, 3)
-            camera_offset = rot_matrix @ np.array([-0.3, 0, 0.2])  # Behind and above
-            camera_pos = np.array(pos) + camera_offset
-            camera_target = np.array(pos) + rot_matrix @ np.array([1.0, 0, 0.05])  # Look ahead
-            
-            # Get camera images for sensor panels (RGB, Depth, Segmentation)
-            # This updates the GUI sensor panels automatically
-            view_matrix = p.computeViewMatrix(
-                cameraEyePosition=camera_pos.tolist(),
-                cameraTargetPosition=camera_target.tolist(),
-                cameraUpVector=[0, 0, 1]
-            )
-            proj_matrix = p.computeProjectionMatrixFOV(
-                fov=60,
-                aspect=1.0,
-                nearVal=0.01,
-                farVal=10.0
-            )
-            
-            # Get camera image - this feeds the RGB/Depth/Segmentation panels
-            width, height, rgb_img, depth_img, seg_img = p.getCameraImage(
-                width=320,
-                height=240,
-                viewMatrix=view_matrix,
-                projectionMatrix=proj_matrix,
-                renderer=p.ER_BULLET_HARDWARE_OPENGL
-            )
-            
-            # Note: The RGB, Depth, and Segmentation images are now available
-            # in the PyBullet GUI tabs. Click on the tabs in the GUI to view them.
+            try:
+                pos, orn = p.getBasePositionAndOrientation(robot.robot_id)
+                
+                # Calculate camera position behind and above robot
+                rot_matrix = p.getMatrixFromQuaternion(orn)
+                rot_matrix = np.array(rot_matrix).reshape(3, 3)
+                camera_offset = rot_matrix @ np.array([-0.3, 0, 0.2])  # Behind and above
+                camera_pos = np.array(pos) + camera_offset
+                camera_target = np.array(pos) + rot_matrix @ np.array([1.0, 0, 0.05])  # Look ahead
+                
+                # Get camera images for sensor panels (RGB, Depth, Segmentation)
+                # Only update every few frames to improve performance
+                if step % 3 == 0:  # Update camera every 3 frames (reduce computation)
+                    view_matrix = p.computeViewMatrix(
+                        cameraEyePosition=camera_pos.tolist(),
+                        cameraTargetPosition=camera_target.tolist(),
+                        cameraUpVector=[0, 0, 1]
+                    )
+                    proj_matrix = p.computeProjectionMatrixFOV(
+                        fov=60,
+                        aspect=1.0,
+                        nearVal=0.01,
+                        farVal=10.0
+                    )
+                    
+                    # Get camera image - this feeds the RGB/Depth/Segmentation panels
+                    width, height, rgb_img, depth_img, seg_img = p.getCameraImage(
+                        width=320,
+                        height=240,
+                        viewMatrix=view_matrix,
+                        projectionMatrix=proj_matrix,
+                        renderer=p.ER_BULLET_HARDWARE_OPENGL
+                    )
+            except:
+                pass  # Skip camera update if robot not available
             
             # Optional: Draw lidar visualization in 3D view
             # Only draw every few frames to improve performance
@@ -372,28 +314,33 @@ def main():
                     )
                     debug_items.append(line_id)
             
-            # Check for collision
-            collision_detected = robot.check_collision()
-            if collision_detected:
-                collision_count += 1
-                # If stuck in collision, back up and turn
-                if collision_count > 5:
-                    print(f"Collision detected at step {step}, backing up...")
-                    # Back up
-                    robot.set_velocity(-0.2, 0)
-                    for _ in range(20):  # Back up for a bit
-                        p.stepSimulation()
-                    # Turn away
-                    left_space = np.mean(lidar[:len(lidar)//2])
-                    right_space = np.mean(lidar[len(lidar)//2:])
-                    turn_vel = -0.8 if left_space > right_space else 0.8
-                    robot.set_velocity(0, turn_vel)
-                    for _ in range(30):  # Turn for a bit
-                        p.stepSimulation()
-                    collision_count = 0
-                    continue  # Skip this step's control
-            else:
-                collision_count = 0  # Reset counter if no collision
+            # Check for collision - simple recovery
+            try:
+                collision_detected = robot.check_collision()
+                if collision_detected:
+                    collision_count += 1
+                    # If stuck in collision, back up and turn
+                    if collision_count > 3:
+                        print(f"Collision detected at step {step}, backing up...")
+                        # Back up
+                        robot.set_velocity(-0.15, 0)
+                        for _ in range(15):  # Back up for a bit
+                            p.stepSimulation()
+                        # Turn away based on lidar
+                        left_space = np.mean(lidar[:len(lidar)//2])
+                        right_space = np.mean(lidar[len(lidar)//2:])
+                        turn_vel = -0.6 if left_space > right_space else 0.6
+                        robot.set_velocity(0, turn_vel)
+                        for _ in range(20):  # Turn for a bit
+                            p.stepSimulation()
+                        collision_count = 0
+                        continue  # Skip this step's control
+                else:
+                    collision_count = 0  # Reset counter if no collision
+            except:
+                # If robot was deleted, skip this iteration
+                collision_count = 0
+                continue
             
             # Compute control
             v, w, reached = controller.compute_control(pose, goal, lidar)
@@ -435,4 +382,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
