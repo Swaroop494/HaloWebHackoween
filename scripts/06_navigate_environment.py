@@ -190,6 +190,12 @@ def main():
     p.setGravity(0, 0, -9.81)
     p.setTimeStep(1/240)
     
+    # Configure debug visualizer to show sensor panels
+    # Enable RGB, depth, and segmentation views in GUI
+    p.configureDebugVisualizer(p.COV_ENABLE_RGB_BUFFER_PREVIEW, 1)
+    p.configureDebugVisualizer(p.COV_ENABLE_DEPTH_BUFFER_PREVIEW, 1)
+    p.configureDebugVisualizer(p.COV_ENABLE_SEGMENTATION_MARK_PREVIEW, 1)
+    
     # Camera setup
     p.resetDebugVisualizerCamera(
         cameraDistance=15,
@@ -244,7 +250,13 @@ def main():
     print(f"\nNavigation Test in {env_type} environment")
     print(f"Goal: ({goal[0]}, {goal[1]})")
     print("Robot will navigate to the green sphere")
-    print("Press Ctrl+C to stop\n")
+    print("\n📹 SENSOR PANELS:")
+    print("   In the PyBullet GUI, you can view sensor data in the tabs:")
+    print("   - RGB: Shows camera RGB view from robot's perspective")
+    print("   - Depth: Shows depth map visualization")
+    print("   - Segmentation: Shows object segmentation")
+    print("   - Lidar: Visualized as colored rays in 3D view")
+    print("\nPress Ctrl+C to stop\n")
     
     step = 0
     max_steps = 10000
