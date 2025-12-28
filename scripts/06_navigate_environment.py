@@ -272,7 +272,44 @@ def main():
             imu_data = robot.get_imu_data()
             odom_data = robot.get_odometry()
             
-            # Visualize sensors in PyBullet GUI
+            # Update camera view to robot's perspective for sensor panels
+            # This feeds the RGB/Depth/Segmentation panels in the GUI
+            pos, orn = p.getBasePositionAndOrientation(robot.robot_id)
+            
+            # Calculate camera position behind and above robot
+            rot_matrix = p.getMatrixFromQuaternion(orn)
+            rot_matrix = np.array(rot_matrix).reshape(3, 3)
+            camera_offset = rot_matrix @ np.array([-0.3, 0, 0.2])  # Behind and above
+            camera_pos = np.array(pos) + camera_offset
+            camera_target = np.array(pos) + rot_matrix @ np.array([1.0, 0, 0.05])  # Look ahead
+            
+            # Get camera images for sensor panels (RGB, Depth, Segmentation)
+            # This updates the GUI sensor panels automatically
+            view_matrix = p.computeViewMatrix(
+                cameraEyePosition=camera_pos.tolist(),
+                cameraTargetPosition=camera_target.tolist(),
+                cameraUpVector=[0, 0, 1]
+            )
+            proj_matrix = p.computeProjectionMatrixFOV(
+                fov=60,
+                aspect=1.0,
+                nearVal=0.01,
+                farVal=10.0
+            )
+            
+            # Get camera image - this feeds the RGB/Depth/Segmentation panels
+            width, height, rgb_img, depth_img, seg_img = p.getCameraImage(
+                width=320,
+                height=240,
+                viewMatrix=view_matrix,
+                projectionMatrix=proj_matrix,
+                renderer=p.ER_BULLET_HARDWARE_OPENGL
+            )
+            
+            # Note: The RGB, Depth, and Segmentation images are now available
+            # in the PyBullet GUI tabs. Click on the tabs in the GUI to view them.
+            
+            # Optional: Draw lidar visualization in 3D view
             # Clear previous debug items
             for item in debug_items:
                 try:
@@ -281,10 +318,9 @@ def main():
                     pass
             debug_items.clear()
             
-            # Draw lidar rays (every 3rd ray to reduce clutter)
+            # Draw lidar rays (every 4th ray to reduce clutter)
             num_rays = len(lidar)
-            
-            for i in range(0, num_rays, 3):  # Every 3rd ray
+            for i in range(0, num_rays, 4):  # Every 4th ray
                 dist = lidar[i]
                 angle = pose[2] + (2*np.pi * i / num_rays)
                 
@@ -299,26 +335,14 @@ def main():
                 intensity = min(1.0, dist / 5.0)
                 color = [1.0 - intensity, intensity, 0.0]
                 
-                # Draw individual line (PyBullet uses singular method)
+                # Draw individual line
                 line_id = p.addUserDebugLine(
                     start, end,
                     lineColorRGB=color,
-                    lineWidth=2,
-                    lifeTime=0.15
+                    lineWidth=1.5,
+                    lifeTime=0.1
                 )
                 debug_items.append(line_id)
-            
-            # Add text overlay with sensor data (above robot)
-            min_lidar = np.min(lidar)
-            text = f"Min Lidar: {min_lidar:.2f}m | Vel: {odom_data['velocity'][0]:.2f}m/s | Ang: {odom_data['velocity'][2]:.2f}rad/s"
-            text_id = p.addUserDebugText(
-                text,
-                textPosition=[pose[0], pose[1], 0.6],
-                textColorRGB=[1, 1, 0],
-                textSize=1.2,
-                lifeTime=0.15
-            )
-            debug_items.append(text_id)
             
             # Check for collision
             collision_detected = robot.check_collision()
