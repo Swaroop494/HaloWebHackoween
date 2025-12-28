@@ -205,3 +205,10 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+robotics_simulation_projects.md
+
+# Project specific
+logs/
+models/*.zip
+*.pkl
+__pycache__/
