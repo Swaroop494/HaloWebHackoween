@@ -271,9 +271,6 @@ def main():
             
             # Draw lidar rays (every 3rd ray to reduce clutter)
             num_rays = len(lidar)
-            ray_from = []
-            ray_to = []
-            colors = []
             
             for i in range(0, num_rays, 3):  # Every 3rd ray
                 dist = lidar[i]
@@ -286,19 +283,15 @@ def main():
                     0.11
                 ]
                 
-                ray_from.append(start)
-                ray_to.append(end)
-                
                 # Color based on distance (red=close, green=far)
                 intensity = min(1.0, dist / 5.0)
-                colors.append([1.0 - intensity, intensity, 0.0])
-            
-            # Draw rays
-            if ray_from:
-                line_id = p.addUserDebugLines(
-                    ray_from, ray_to, 
-                    lineColorsRGB=colors, 
-                    lineWidth=2, 
+                color = [1.0 - intensity, intensity, 0.0]
+                
+                # Draw individual line (PyBullet uses singular method)
+                line_id = p.addUserDebugLine(
+                    start, end,
+                    lineColorRGB=color,
+                    lineWidth=2,
                     lifeTime=0.15
                 )
                 debug_items.append(line_id)
