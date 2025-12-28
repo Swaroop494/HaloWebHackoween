@@ -154,15 +154,25 @@ class DiffDriveRobot:
     
     def check_collision(self):
         """Check if robot is in collision with any object."""
-        contacts = p.getContactPoints(bodyA=self.robot_id)
-        
-        for contact in contacts:
-            # Ignore ground contact
-            if contact[2] == 0:  # ground plane ID
-                continue
-            # Check if contact is with base (not wheels)
-            if contact[3] == -1:  # base link
-                return True
+        try:
+            contacts = p.getContactPoints(bodyA=self.robot_id)
+            
+            if not contacts:
+                return False
+            
+            for contact in contacts:
+                # Ignore ground contact
+                if contact[2] == 0:  # ground plane ID
+                    continue
+                # Check if contact is with base (not wheels)
+                # contact[3] is link index, -1 is base link
+                if contact[3] == -1:  # base link
+                    # Check contact force - only consider significant collisions
+                    if len(contact) > 9 and contact[9] > 0.1:  # Normal force
+                        return True
+        except:
+            # If we can't check contacts, assume no collision
+            return False
         
         return False
     
@@ -292,17 +302,35 @@ class DiffDriveRobot:
     
     def reset(self, pos, yaw):
         """Reset robot to new position."""
-        orn = p.getQuaternionFromEuler([0, 0, yaw])
-        p.resetBasePositionAndOrientation(self.robot_id, [pos[0], pos[1], 0.1], orn)
-        p.resetBaseVelocity(self.robot_id, [0, 0, 0], [0, 0, 0])
-        
-        # Reset wheel velocities
-        p.setJointMotorControl2(
-            self.robot_id, self.left_wheel_joint,
-            p.VELOCITY_CONTROL, targetVelocity=0, force=0
-        )
-        p.setJointMotorControl2(
-            self.robot_id, self.right_wheel_joint,
-            p.VELOCITY_CONTROL, targetVelocity=0, force=0
-        )
+        try:
+            # Check if robot still exists
+            try:
+                p.getBasePositionAndOrientation(self.robot_id)
+            except:
+                # Robot was deleted, need to reload
+                start_orn = p.getQuaternionFromEuler([0, 0, yaw])
+                self.robot_id = p.loadURDF(self.urdf_path, [pos[0], pos[1], 0.1], start_orn)
+                self._find_joints()
+                return
+            
+            # Reset position and velocity
+            orn = p.getQuaternionFromEuler([0, 0, yaw])
+            p.resetBasePositionAndOrientation(self.robot_id, [pos[0], pos[1], 0.1], orn)
+            p.resetBaseVelocity(self.robot_id, [0, 0, 0], [0, 0, 0])
+            
+            # Reset wheel velocities
+            p.setJointMotorControl2(
+                self.robot_id, self.left_wheel_joint,
+                p.VELOCITY_CONTROL, targetVelocity=0, force=0
+            )
+            p.setJointMotorControl2(
+                self.robot_id, self.right_wheel_joint,
+                p.VELOCITY_CONTROL, targetVelocity=0, force=0
+            )
+            
+            # Reset state
+            self.last_v = 0.0
+            self.last_w = 0.0
+        except Exception as e:
+            print(f"Warning: Reset failed: {e}")
 

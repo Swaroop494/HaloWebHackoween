@@ -31,7 +31,8 @@ class NavigationController:
         self.max_angular_vel = 2.0
         
         # Obstacle avoidance parameters
-        self.safety_distance = 0.5
+        self.safety_distance = 0.6  # Increased safety distance
+        self.critical_distance = 0.4  # Very close - stop and turn
         self.obstacle_repulsion = 1.5
         self.min_turn_distance = 0.3
     
@@ -88,26 +89,37 @@ class NavigationController:
                 elif ray_angle_rel < -np.pi/6 and ray_angle_rel > -np.pi/2:
                     right_obstacle = True
         
-        # Obstacle avoidance behavior
-        if front_obstacle:
+        # Check for critical obstacle (very close)
+        if min_lidar < self.critical_distance:
+            # Stop and turn away from obstacle
+            v = 0.0
+            
+            # Find direction with most space
+            left_space = np.mean(lidar_scan[:num_rays//2])
+            right_space = np.mean(lidar_scan[num_rays//2:])
+            
+            if left_space > right_space:
+                w = -self.max_angular_vel * 0.9  # Turn left
+            else:
+                w = self.max_angular_vel * 0.9   # Turn right
+        elif front_obstacle:
             # Obstacle in front - turn away
+            v = 0.2  # Slow down significantly
+            
             if left_obstacle and not right_obstacle:
                 # Turn right
-                w = self.max_angular_vel
-                v = 0.1  # Slow down
+                w = self.max_angular_vel * 0.8
             elif right_obstacle and not left_obstacle:
                 # Turn left
-                w = -self.max_angular_vel
-                v = 0.1
+                w = -self.max_angular_vel * 0.8
             else:
                 # Turn in direction with more space
                 left_space = np.mean(lidar_scan[:num_rays//2])
                 right_space = np.mean(lidar_scan[num_rays//2:])
                 if left_space > right_space:
-                    w = -self.max_angular_vel * 0.8
+                    w = -self.max_angular_vel * 0.7
                 else:
-                    w = self.max_angular_vel * 0.8
-                v = 0.15
+                    w = self.max_angular_vel * 0.7
         else:
             # No immediate obstacle - navigate to goal
             v = min(self.max_linear_vel, self.kp_linear * distance_to_goal)
@@ -115,11 +127,11 @@ class NavigationController:
             
             # Slow down if obstacle is close
             if min_lidar < self.safety_distance * 1.5:
-                v *= (min_lidar / (self.safety_distance * 1.5))
+                v *= max(0.3, min_lidar / (self.safety_distance * 1.5))
             
             # Slow down when turning sharply
             if abs(heading_error) > 0.5:
-                v *= 0.6
+                v *= 0.5
         
         return v, w, False
 
@@ -199,12 +211,27 @@ def main():
             lidar = robot.get_lidar_scan()
             
             # Check for collision
-            if robot.check_collision():
+            collision_detected = robot.check_collision()
+            if collision_detected:
                 collision_count += 1
-                if collision_count > 10:  # Stuck in collision
-                    print("Robot stuck in collision, resetting...")
-                    robot.reset([0, 0], 0)
+                # If stuck in collision, back up and turn
+                if collision_count > 5:
+                    print(f"Collision detected at step {step}, backing up...")
+                    # Back up
+                    robot.set_velocity(-0.2, 0)
+                    for _ in range(20):  # Back up for a bit
+                        p.stepSimulation()
+                    # Turn away
+                    left_space = np.mean(lidar[:len(lidar)//2])
+                    right_space = np.mean(lidar[len(lidar)//2:])
+                    turn_vel = -0.8 if left_space > right_space else 0.8
+                    robot.set_velocity(0, turn_vel)
+                    for _ in range(30):  # Turn for a bit
+                        p.stepSimulation()
                     collision_count = 0
+                    continue  # Skip this step's control
+            else:
+                collision_count = 0  # Reset counter if no collision
             
             # Compute control
             v, w, reached = controller.compute_control(pose, goal, lidar)
