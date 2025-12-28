@@ -312,7 +312,6 @@ def main():
     builder = EnvironmentBuilder(physics_client)
     
     # Choose environment type
-    import sys
     env_type = sys.argv[1] if len(sys.argv) > 1 else "warehouse"
     
     if env_type == "warehouse":

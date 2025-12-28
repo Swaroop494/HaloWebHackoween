@@ -11,7 +11,14 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.diff_drive_robot import DiffDriveRobot
-from scripts.05_environment_builder import EnvironmentBuilder
+# Import environment builder using importlib since filename starts with number
+import importlib.util
+env_builder_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+                                "scripts", "05_environment_builder.py")
+spec = importlib.util.spec_from_file_location("environment_builder", env_builder_path)
+env_builder_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(env_builder_module)
+EnvironmentBuilder = env_builder_module.EnvironmentBuilder
 
 class NavigationController:
     """Advanced navigation controller with obstacle avoidance."""
