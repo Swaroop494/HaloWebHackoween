@@ -34,6 +34,8 @@ class SensorStreamVisualizer:
     def setup_plots(self):
         """Setup matplotlib figure with subplots for different sensors."""
         self.fig = plt.figure(figsize=(16, 10))
+        # Make window non-blocking and allow it to be moved to background
+        self.fig.canvas.manager.set_window_title('Sensor Streams - Can be minimized')
         gs = self.fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
         
         # Lidar visualization (top left, large)
@@ -231,7 +233,9 @@ class SensorStreamVisualizer:
         self.update_odometry_plot(odom_data)
         self.update_trajectory_plot(pose)
         
-        plt.draw()
+        # Use non-blocking draw to allow PyBullet window to stay on top
+        self.fig.canvas.draw_idle()
+        self.fig.canvas.flush_events()
         plt.pause(0.01)
 
 def main():

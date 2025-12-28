@@ -124,6 +124,36 @@ python scripts/04_sensor_logger.py
 
 Records all sensor data to JSON files and saves camera images in `logs/sensor_data/`.
 
+### 5. Environment Builder
+
+```bash
+# Create warehouse environment
+python scripts/05_environment_builder.py warehouse
+
+# Create street environment
+python scripts/05_environment_builder.py street
+
+# Create maze environment
+python scripts/05_environment_builder.py maze
+```
+
+Creates realistic environments with obstacles for testing navigation.
+
+### 6. Navigation in Environments
+
+```bash
+# Navigate in warehouse
+python scripts/06_navigate_environment.py warehouse
+
+# Navigate in street
+python scripts/06_navigate_environment.py street
+
+# Navigate in maze
+python scripts/06_navigate_environment.py maze
+```
+
+Tests robot navigation with obstacle avoidance in different environments.
+
 ## Robot Specifications
 
 - **Type**: Differential drive robot
@@ -149,6 +179,8 @@ Records all sensor data to JSON files and saves camera images in `logs/sensor_da
 | `02_simple_navigation.py` | Simple goal-based navigation |
 | `03_sensor_streams.py` | Real-time sensor visualization dashboard |
 | `04_sensor_logger.py` | Record sensor data for analysis |
+| `05_environment_builder.py` | Build warehouse/street/maze environments |
+| `06_navigate_environment.py` | Navigate with obstacle avoidance in environments |
 | `diagnose_pybullet.py` | Diagnose installation issues |
 
 ## API Usage
