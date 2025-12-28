@@ -7,7 +7,9 @@ A comprehensive PyBullet-based simulation environment for a differential drive r
 - ✅ **3D Physics Simulation**: Full PyBullet physics with realistic robot dynamics
 - ✅ **Differential Drive Robot**: Custom URDF model with wheels, base, and sensors
 - ✅ **Real-time Sensor Streams**: Lidar, RGB camera, depth camera, IMU, and odometry
-- ✅ **Navigation Capabilities**: Goal-based navigation with obstacle avoidance
+- ✅ **Built-in Sensor Visualization**: RGB, depth, and segmentation views in PyBullet GUI
+- ✅ **PID Navigation Controller**: Simple, effective goal-based navigation with obstacle avoidance
+- ✅ **Multiple Environments**: Warehouse, street, and maze environments for testing
 - ✅ **Sensor Data Logging**: Record and analyze sensor data for training
 - ✅ **RL-Ready**: Structured for Gymnasium environment integration
 
@@ -152,7 +154,13 @@ python scripts/06_navigate_environment.py street
 python scripts/06_navigate_environment.py maze
 ```
 
-Tests robot navigation with obstacle avoidance in different environments.
+Tests robot navigation with PID-based obstacle avoidance in different environments. The robot uses a simple PID controller to navigate to the goal while avoiding obstacles.
+
+**Features:**
+- **PID Controller**: Proportional and derivative terms for smooth navigation
+- **Obstacle Avoidance**: Modifies heading when obstacles detected in front
+- **Sensor Visualization**: RGB, depth, and segmentation views in PyBullet GUI tabs
+- **Lidar Visualization**: Colored rays in 3D view (red=close, green=far)
 
 ## Robot Specifications
 
@@ -180,7 +188,7 @@ Tests robot navigation with obstacle avoidance in different environments.
 | `03_sensor_streams.py` | Real-time sensor visualization dashboard |
 | `04_sensor_logger.py` | Record sensor data for analysis |
 | `05_environment_builder.py` | Build warehouse/street/maze environments |
-| `06_navigate_environment.py` | Navigate with obstacle avoidance in environments |
+| `06_navigate_environment.py` | Navigate with PID controller and obstacle avoidance |
 | `diagnose_pybullet.py` | Diagnose installation issues |
 
 ## API Usage
@@ -221,10 +229,11 @@ See [INSTALL.md](INSTALL.md) for detailed troubleshooting:
 
 ### Common Issues
 
-**Matplotlib window stays on top:**
+**Matplotlib window stays on top (sensor streams script):**
 - This is a known matplotlib behavior
 - Use Alt+Tab (Cmd+Tab on Mac) to switch windows
 - Or minimize the matplotlib window
+- Note: `06_navigate_environment.py` uses built-in PyBullet GUI sensor panels instead
 
 **PyBullet GUI doesn't open:**
 - Ensure you're using `p.GUI` mode (not `p.DIRECT`)

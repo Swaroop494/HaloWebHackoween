@@ -212,3 +212,4 @@ logs/
 models/*.zip
 *.pkl
 __pycache__/
+JOURNAL.md
