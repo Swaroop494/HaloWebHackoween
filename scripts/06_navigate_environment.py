@@ -6,6 +6,7 @@ import numpy as np
 import os
 import sys
 import time
+import math
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -35,6 +36,13 @@ class NavigationController:
         self.critical_distance = 0.4  # Very close - stop and turn
         self.obstacle_repulsion = 1.5
         self.min_turn_distance = 0.3
+        
+        # State memory to prevent oscillation
+        self.last_turn_direction = 0  # -1 for left, 1 for right, 0 for none
+        self.stuck_counter = 0
+        self.last_position = None
+        self.stuck_threshold = 0.1  # Consider stuck if moved less than this in 50 steps
+        self.position_history = []
     
     def compute_control(self, robot_pose, goal, lidar_scan):
         """
@@ -89,6 +97,35 @@ class NavigationController:
                 elif ray_angle_rel < -np.pi/6 and ray_angle_rel > -np.pi/2:
                     right_obstacle = True
         
+        # Check if robot is stuck (oscillating)
+        current_pos = np.array([robot_pose[0], robot_pose[1]])
+        self.position_history.append(current_pos)
+        if len(self.position_history) > 50:
+            self.position_history.pop(0)
+        
+        if len(self.position_history) >= 20:
+            # Check if robot has moved significantly
+            recent_positions = np.array(self.position_history[-20:])
+            movement = np.max(np.linalg.norm(recent_positions - recent_positions[0], axis=1))
+            if movement < self.stuck_threshold:
+                self.stuck_counter += 1
+                # When stuck, commit to a direction and turn more aggressively
+                if self.last_turn_direction == 0:
+                    # Choose initial direction based on space
+                    left_space = np.mean(lidar_scan[:num_rays//2])
+                    right_space = np.mean(lidar_scan[num_rays//2:])
+                    self.last_turn_direction = -1 if left_space > right_space else 1
+                
+                # Turn in committed direction
+                v = 0.1
+                w = self.last_turn_direction * self.max_angular_vel * 0.8
+                return v, w, False
+            else:
+                self.stuck_counter = 0
+                self.last_turn_direction = 0  # Reset when moving
+        else:
+            self.stuck_counter = 0
+        
         # Check for critical obstacle (very close)
         if min_lidar < self.critical_distance:
             # Stop and turn away from obstacle
@@ -100,30 +137,40 @@ class NavigationController:
             
             if left_space > right_space:
                 w = -self.max_angular_vel * 0.9  # Turn left
+                self.last_turn_direction = -1
             else:
                 w = self.max_angular_vel * 0.9   # Turn right
+                self.last_turn_direction = 1
         elif front_obstacle:
             # Obstacle in front - turn away
             v = 0.2  # Slow down significantly
             
-            if left_obstacle and not right_obstacle:
-                # Turn right
-                w = self.max_angular_vel * 0.8
-            elif right_obstacle and not left_obstacle:
-                # Turn left
-                w = -self.max_angular_vel * 0.8
+            # Find direction with most space
+            left_space = np.mean(lidar_scan[:num_rays//2])
+            right_space = np.mean(lidar_scan[num_rays//2:])
+            
+            # Use state memory to prevent oscillation
+            if abs(left_space - right_space) < 0.3:  # Similar space on both sides
+                # Use last turn direction to maintain consistency
+                if self.last_turn_direction == 0:
+                    self.last_turn_direction = -1 if left_space > right_space else 1
+                w = self.last_turn_direction * self.max_angular_vel * 0.7
             else:
-                # Turn in direction with more space
-                left_space = np.mean(lidar_scan[:num_rays//2])
-                right_space = np.mean(lidar_scan[num_rays//2:])
+                # Clear preference - turn toward more space
                 if left_space > right_space:
                     w = -self.max_angular_vel * 0.7
+                    self.last_turn_direction = -1
                 else:
                     w = self.max_angular_vel * 0.7
+                    self.last_turn_direction = 1
         else:
             # No immediate obstacle - navigate to goal
             v = min(self.max_linear_vel, self.kp_linear * distance_to_goal)
             w = np.clip(self.kp_angular * heading_error, -self.max_angular_vel, self.max_angular_vel)
+            
+            # Reset turn direction memory when clear path
+            if min_lidar > self.safety_distance * 1.5:
+                self.last_turn_direction = 0
             
             # Slow down if obstacle is close
             if min_lidar < self.safety_distance * 1.5:
