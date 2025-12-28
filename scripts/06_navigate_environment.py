@@ -250,12 +250,70 @@ def main():
     max_steps = 10000
     goal_reached = False
     collision_count = 0
+    debug_items = []  # Track debug items for cleanup
     
     try:
         while step < max_steps and not goal_reached:
             # Get robot state
             pose = robot.get_pose()
             lidar = robot.get_lidar_scan()
+            imu_data = robot.get_imu_data()
+            odom_data = robot.get_odometry()
+            
+            # Visualize sensors in PyBullet GUI
+            # Clear previous debug items
+            for item in debug_items:
+                try:
+                    p.removeUserDebugItem(item)
+                except:
+                    pass
+            debug_items.clear()
+            
+            # Draw lidar rays (every 3rd ray to reduce clutter)
+            num_rays = len(lidar)
+            ray_from = []
+            ray_to = []
+            colors = []
+            
+            for i in range(0, num_rays, 3):  # Every 3rd ray
+                dist = lidar[i]
+                angle = pose[2] + (2*np.pi * i / num_rays)
+                
+                start = [pose[0], pose[1], 0.11]
+                end = [
+                    pose[0] + dist * np.cos(angle),
+                    pose[1] + dist * np.sin(angle),
+                    0.11
+                ]
+                
+                ray_from.append(start)
+                ray_to.append(end)
+                
+                # Color based on distance (red=close, green=far)
+                intensity = min(1.0, dist / 5.0)
+                colors.append([1.0 - intensity, intensity, 0.0])
+            
+            # Draw rays
+            if ray_from:
+                line_id = p.addUserDebugLines(
+                    ray_from, ray_to, 
+                    lineColorsRGB=colors, 
+                    lineWidth=2, 
+                    lifeTime=0.15
+                )
+                debug_items.append(line_id)
+            
+            # Add text overlay with sensor data (above robot)
+            min_lidar = np.min(lidar)
+            text = f"Min Lidar: {min_lidar:.2f}m | Vel: {odom_data['velocity'][0]:.2f}m/s | Ang: {odom_data['velocity'][2]:.2f}rad/s"
+            text_id = p.addUserDebugText(
+                text,
+                textPosition=[pose[0], pose[1], 0.6],
+                textColorRGB=[1, 1, 0],
+                textSize=1.2,
+                lifeTime=0.15
+            )
+            debug_items.append(text_id)
             
             # Check for collision
             collision_detected = robot.check_collision()
