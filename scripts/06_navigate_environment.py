@@ -270,8 +270,8 @@ def main():
         basePosition=[goal[0], goal[1], 0.3]
     )
     
-    # Create navigation controller
-    controller = NavigationController()
+    # Create navigation controller (simple PID-based)
+    controller = PIDNavigationController()
     
     print(f"\nNavigation Test in {env_type} environment")
     print(f"Goal: ({goal[0]}, {goal[1]})")
