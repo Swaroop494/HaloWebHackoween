@@ -125,7 +125,7 @@ class DynamicObstacleAvoidance:
         return path
     
     def update(self, robot_pose: np.ndarray, goal: Tuple[float, float],
-               lidar_scan: np.ndarray, current_time: float) -> Tuple[float, float, bool]:
+               lidar_scan: np.ndarray, current_time: float, perf_logger=None) -> Tuple[float, float, bool]:
         """
         Update navigation with dynamic replanning.
         
@@ -157,7 +157,7 @@ class DynamicObstacleAvoidance:
         
         # Replan if needed
         if needs_replan:
-            path = self.plan_path(start, goal, robot_pose, lidar_scan, perf_logger=None)
+            path = self.plan_path(start, goal, robot_pose, lidar_scan, perf_logger=perf_logger)
             if path is not None:
                 self.current_path = path
                 self.path_follower.set_path(path)
@@ -175,7 +175,7 @@ class DynamicObstacleAvoidance:
                     return 0.0, 0.0, True
                 else:
                     # Replan to goal
-                    path = self.plan_path(start, goal, robot_pose, lidar_scan)
+                    path = self.plan_path(start, goal, robot_pose, lidar_scan, perf_logger=perf_logger)
                     if path is not None:
                         self.current_path = path
                         self.path_follower.set_path(path)
@@ -453,7 +453,7 @@ def main():
                 if multi_goal:
                     v, w, all_goals_reached = navigator.update(pose, lidar)
                 else:
-                    v, w, goal_reached = navigator.update(pose, goals[0], lidar, time.time())
+                    v, w, goal_reached = navigator.update(pose, goals[0], lidar, time.time(), perf_logger=perf_logger)
                     all_goals_reached = goal_reached
             
             if all_goals_reached:
