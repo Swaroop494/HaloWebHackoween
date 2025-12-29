@@ -3,12 +3,49 @@
 import os
 import sys
 import argparse
+import torch
 from stable_baselines3 import PPO, SAC, TD3
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
+
+
+def get_device(device_str: str) -> str:
+    """
+    Get the appropriate device for training.
+    Auto-detects MPS (Apple Silicon GPU) if available.
+    
+    Args:
+        device_str: 'auto', 'cpu', 'cuda', or 'mps'
+        
+    Returns:
+        Device string for PyTorch/Stable-Baselines3
+    """
+    if device_str == 'auto':
+        # Auto-detect best device
+        if torch.cuda.is_available():
+            return 'cuda'
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            return 'mps'
+        else:
+            return 'cpu'
+    elif device_str == 'mps':
+        # Check MPS availability
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            return 'mps'
+        else:
+            print("Warning: MPS (Apple Silicon GPU) not available, falling back to CPU")
+            return 'cpu'
+    elif device_str == 'cuda':
+        if torch.cuda.is_available():
+            return 'cuda'
+        else:
+            print("Warning: CUDA not available, falling back to CPU")
+            return 'cpu'
+    else:
+        return device_str
 
 # Add parent directory to path
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -31,6 +68,9 @@ def make_env(rank=0, seed=0, env_type="warehouse", render_mode=None):
 
 def train(args):
     """Main training function."""
+    # Determine device
+    device = get_device(args.device)
+    
     print("="*60)
     print("PyBullet Navigation RL Training")
     print("="*60)
@@ -38,6 +78,13 @@ def train(args):
     print(f"Environment: {args.env_type}")
     print(f"Total timesteps: {args.timesteps:,}")
     print(f"Number of parallel environments: {args.num_envs}")
+    print(f"Device: {device}")
+    if device == 'mps':
+        print("  → Using Apple Silicon GPU (MPS)")
+    elif device == 'cuda':
+        print("  → Using CUDA GPU")
+    else:
+        print("  → Using CPU")
     print("="*60)
     
     # Create directories
@@ -97,7 +144,7 @@ def train(args):
             ent_coef=0.01,
             vf_coef=0.5,
             tensorboard_log='logs/tensorboard',
-            device=args.device,
+            device=device,
             seed=args.seed
         )
     elif args.algorithm.lower() == 'sac':
@@ -115,7 +162,7 @@ def train(args):
             gradient_steps=1,
             ent_coef='auto',
             tensorboard_log='logs/tensorboard',
-            device=args.device,
+            device=device,
             seed=args.seed
         )
     elif args.algorithm.lower() == 'td3':
@@ -132,7 +179,7 @@ def train(args):
             train_freq=1,
             gradient_steps=1,
             tensorboard_log='logs/tensorboard',
-            device=args.device,
+            device=device,
             seed=args.seed
         )
     else:
@@ -175,9 +222,9 @@ def main():
                        help='Number of parallel environments (default: 4)')
     parser.add_argument('--learning-rate', type=float, default=3e-4,
                        help='Learning rate (default: 3e-4)')
-    parser.add_argument('--device', type=str, default='cpu',
-                       choices=['cpu', 'cuda'],
-                       help='Device to use (default: cpu)')
+    parser.add_argument('--device', type=str, default='auto',
+                       choices=['auto', 'cpu', 'cuda', 'mps'],
+                       help='Device to use: auto (detect best), cpu, cuda, or mps (Apple Silicon GPU) (default: auto)')
     parser.add_argument('--seed', type=int, default=42,
                        help='Random seed (default: 42)')
     parser.add_argument('--render-eval', action='store_true',

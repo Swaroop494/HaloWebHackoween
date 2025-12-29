@@ -288,6 +288,13 @@ See [INSTALL.md](INSTALL.md) for detailed troubleshooting:
 - Ensure conda/virtual environment is activated
 - Verify installation: `python scripts/00_check_setup.py`
 
+**Apple Silicon GPU (M1/M2/M3) for RL Training:**
+- The training script automatically detects and uses MPS (Metal Performance Shaders) if available
+- Use `--device auto` (default) to auto-detect the best device
+- Or explicitly use `--device mps` to use Apple Silicon GPU
+- Ensure PyTorch is installed: `pip install torch` (should include MPS support by default)
+- GPU acceleration can significantly speed up training compared to CPU
+
 ## Next Steps
 
 - [x] Environment Setup: Create warehouse/street environments with obstacles
