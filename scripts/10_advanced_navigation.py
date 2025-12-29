@@ -455,6 +455,38 @@ def main():
                 # Still log timing even when skipping visualization
                 perf_logger.log_timing('visualization', 0.0)
             
+            # Check for collision and handle recovery
+            try:
+                collision_detected = robot.check_collision()
+                if collision_detected:
+                    collision_count += 1
+                    # If stuck in collision, back up and turn
+                    if collision_count > 3:
+                        print(f"Collision detected at step {step}, backing up...")
+                        # Back up
+                        robot.set_velocity(-0.2, 0)
+                        for _ in range(20):  # Back up for a bit
+                            p.stepSimulation()
+                        # Turn away based on lidar
+                        left_space = np.mean(lidar[:len(lidar)//2])
+                        right_space = np.mean(lidar[len(lidar)//2:])
+                        turn_vel = -0.8 if left_space > right_space else 0.8
+                        robot.set_velocity(0, turn_vel)
+                        for _ in range(30):  # Turn for a bit
+                            p.stepSimulation()
+                        collision_count = 0
+                        # Clear current path to force replanning
+                        if hasattr(navigator, 'avoidance'):
+                            navigator.avoidance.current_path = None
+                            navigator.avoidance.last_replan_time = 0  # Force immediate replan
+                        else:
+                            navigator.current_path = None
+                        continue  # Skip this step's control
+                else:
+                    collision_count = 0  # Reset counter if no collision
+            except:
+                collision_count = 0
+            
             # Update navigation
             with perf_logger.time_operation('navigation_update'):
                 if multi_goal:
@@ -462,6 +494,34 @@ def main():
                 else:
                     v, w, goal_reached = navigator.update(pose, goals[0], lidar, time.time(), perf_logger=perf_logger)
                     all_goals_reached = goal_reached
+            
+            # Check if robot is stuck (not making progress) - check every 100 steps
+            if step > 100 and step % 100 == 0:
+                recent_positions = tracker.poses[-100:] if len(tracker.poses) >= 100 else tracker.poses
+                if len(recent_positions) >= 50:
+                    positions = np.array([p[:2] for p in recent_positions])
+                    movement = np.max(np.linalg.norm(positions - positions[0], axis=1))
+                    if movement < 0.15:  # Moved less than 15cm in last 50 steps
+                        print(f"Robot appears stuck at step {step} (moved {movement:.3f}m), attempting recovery...")
+                        # Back up first
+                        robot.set_velocity(-0.15, 0)
+                        for _ in range(15):
+                            p.stepSimulation()
+                        # Force replanning
+                        if hasattr(navigator, 'avoidance'):
+                            navigator.avoidance.current_path = None
+                            navigator.avoidance.last_replan_time = 0  # Force immediate replan
+                        else:
+                            navigator.current_path = None
+                        # Turn away from obstacles
+                        min_lidar = np.min(lidar)
+                        left_space = np.mean(lidar[:len(lidar)//2])
+                        right_space = np.mean(lidar[len(lidar)//2:])
+                        turn_vel = -1.2 if left_space > right_space else 1.2
+                        robot.set_velocity(0.1, turn_vel)
+                        for _ in range(50):  # Turn for a bit longer
+                            p.stepSimulation()
+                        print(f"Recovery complete, continuing navigation...")
             
             if all_goals_reached:
                 print(f"\n✓ All goals reached at step {step}!")
