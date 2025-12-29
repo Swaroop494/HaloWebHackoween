@@ -11,7 +11,11 @@ A comprehensive PyBullet-based simulation environment for a differential drive r
 - ✅ **PID Navigation Controller**: Simple, effective goal-based navigation with obstacle avoidance
 - ✅ **Multiple Environments**: Warehouse, street, and maze environments for testing
 - ✅ **Sensor Data Logging**: Record and analyze sensor data for training
-- ✅ **RL-Ready**: Structured for Gymnasium environment integration
+- ✅ **RL-Ready**: Full Gymnasium environment wrapper for training
+- ✅ **Path Planning**: A* and RRT path planning algorithms
+- ✅ **Advanced Navigation**: Dynamic obstacle avoidance with replanning
+- ✅ **Performance Logging**: Detailed timing and performance metrics
+- ✅ **Localization Tracking**: Robot pose and velocity tracking
 
 ## Quick Start
 
@@ -67,11 +71,19 @@ pybullet_sim/
 │   └── diff_drive_robot.urdf     # Differential drive robot model
 ├── scripts/                       # Python scripts
 │   ├── diff_drive_robot.py       # Robot controller class with sensors
-│   ├── 00_check_setup.py        # Setup verification
-│   ├── 01_test_pybullet.py      # Basic robot movement test
+│   ├── path_planner.py           # A* and RRT path planning
+│   ├── localization_tracker.py   # Pose and velocity tracking
+│   ├── pybullet_nav_env.py       # Gymnasium environment wrapper
+│   ├── 00_check_setup.py         # Setup verification
+│   ├── 01_test_pybullet.py       # Basic robot movement test
 │   ├── 02_simple_navigation.py   # Simple goal navigation
-│   ├── 03_sensor_streams.py      # Real-time sensor visualization
+│   ├── 03_sensor_streams.py       # Real-time sensor visualization
 │   ├── 04_sensor_logger.py       # Sensor data recording
+│   ├── 05_environment_builder.py # Environment creation
+│   ├── 06_navigate_environment.py # PID navigation with obstacles
+│   ├── 10_advanced_navigation.py # Path planning navigation
+│   ├── 11_train_rl.py            # RL training script
+│   ├── 12_evaluate_rl.py          # RL evaluation script
 │   └── diagnose_pybullet.py      # Installation diagnostics
 ├── models/                        # Trained RL models (created during training)
 ├── logs/                          # Logs and sensor data
@@ -216,7 +228,11 @@ Advanced navigation features with path planning algorithms:
 | `05_environment_builder.py` | Build warehouse/street/maze environments |
 | `06_navigate_environment.py` | Navigate with PID controller and obstacle avoidance |
 | `10_advanced_navigation.py` | Advanced navigation with A*/RRT path planning |
+| `11_train_rl.py` | Train RL agent (PPO, SAC, TD3) |
+| `12_evaluate_rl.py` | Evaluate trained RL models |
 | `path_planner.py` | Path planning algorithms (A*, RRT, PathFollower) |
+| `pybullet_nav_env.py` | Gymnasium environment wrapper for RL |
+| `localization_tracker.py` | Robot pose and velocity tracking |
 | `diagnose_pybullet.py` | Diagnose installation issues |
 
 ## API Usage
@@ -274,10 +290,12 @@ See [INSTALL.md](INSTALL.md) for detailed troubleshooting:
 
 ## Next Steps
 
-1. **Environment Setup**: Create warehouse/street environments with obstacles
-2. **Advanced Navigation**: Implement path planning and obstacle avoidance
-3. **RL Training**: Set up Gymnasium environment for reinforcement learning
-4. **Sim-to-Real**: Prepare for real robot deployment
+- [x] Environment Setup: Create warehouse/street environments with obstacles
+- [x] Advanced Navigation: Implement path planning and obstacle avoidance
+- [x] RL Training: Set up Gymnasium environment for reinforcement learning
+- [ ] Hyperparameter tuning for RL algorithms
+- [ ] Curriculum learning for harder environments
+- [ ] Sim-to-Real: Prepare for real robot deployment
 
 ## Contributing
 
