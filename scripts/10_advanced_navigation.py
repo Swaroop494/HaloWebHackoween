@@ -352,6 +352,7 @@ def main():
     all_goals_reached = False
     debug_items = []
     path_lines = []
+    collision_count = 0  # Track consecutive collision frames
     
     try:
         while step < max_steps and not all_goals_reached:
