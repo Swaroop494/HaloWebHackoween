@@ -138,10 +138,10 @@ def train(args):
             n_steps=2048,
             batch_size=256,
             n_epochs=10,
-            gamma=0.99,
+            gamma=0.995,  # Increased from 0.99 (values future rewards more)
             gae_lambda=0.95,
             clip_range=0.2,
-            ent_coef=0.01,
+            ent_coef=0.02,  # Increased from 0.01 (more exploration)
             vf_coef=0.5,
             tensorboard_log='logs/tensorboard',
             device=device,

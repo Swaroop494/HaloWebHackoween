@@ -74,7 +74,7 @@ class PyBulletNavEnv(gym.Env):
         # Environment parameters
         self.arena_size = 10.0
         self.goal_threshold = 0.4
-        self.max_steps = 1000
+        self.max_steps = 1500  # Increased from 1000 to give more time
         self.time_step = 1/24  # Control rate
         
         # State
@@ -237,24 +237,38 @@ class PyBulletNavEnv(gym.Env):
         
         reward = 0.0
         
-        # Progress reward (encourage moving toward goal)
-        reward += 10.0 * progress
+        # Shaped reward: distance-based (encourages getting closer)
+        # Larger reward when closer to goal
+        distance_reward = 1.0 / (1.0 + current_distance)  # 1.0 at goal, ~0.1 at 9m
+        reward += 5.0 * distance_reward
         
-        # Goal reached reward
+        # Progress reward (encourage moving toward goal) - increased weight
+        reward += 20.0 * progress  # Increased from 10.0
+        
+        # Bonus for making progress (even small)
+        if progress > 0.01:  # Moved at least 1cm closer
+            reward += 1.0
+        
+        # Goal reached reward (large bonus)
         if current_distance < self.goal_threshold:
-            reward += 100.0
+            reward += 200.0  # Increased from 100.0
         
-        # Time penalty (encourage efficiency)
-        reward -= 0.1
+        # Time penalty (reduced - less harsh)
+        reward -= 0.01  # Reduced from 0.1 (10x less harsh)
         
         # Collision penalty
         if info["collision"]:
-            reward -= 50.0
+            reward -= 30.0  # Reduced from 50.0
         
-        # Obstacle penalty (based on lidar)
+        # Obstacle penalty (based on lidar) - only for very close
         min_lidar = np.min(obs[5:41])  # Lidar readings in observation
-        if min_lidar < 0.3:  # Very close to obstacle
-            reward -= 5.0 * (0.3 - min_lidar)
+        if min_lidar < 0.2:  # Very close to obstacle (reduced threshold)
+            reward -= 3.0 * (0.2 - min_lidar)  # Reduced penalty
+        
+        # Penalty for getting stuck (not making progress for a while)
+        # This encourages exploration and escaping local minima
+        if abs(progress) < 0.01 and current_distance > 0.5:  # Stuck and not at goal
+            reward -= 0.5
         
         # Termination conditions (ensure Python bool, not numpy bool)
         terminated = bool(current_distance < self.goal_threshold)
