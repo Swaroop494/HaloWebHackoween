@@ -5,6 +5,7 @@ import sys
 import argparse
 import numpy as np
 import time
+import pybullet as p
 from stable_baselines3 import PPO, SAC, TD3
 
 # Add parent directory to path

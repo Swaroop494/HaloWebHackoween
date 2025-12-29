@@ -213,6 +213,9 @@ class PyBulletNavEnv(gym.Env):
     
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict]:
         """Execute action."""
+        # Store original action for reward calculation (before clipping)
+        original_w = action[1]
+        
         # Apply action (clamp to action space) - forward-only
         v, w = action[0], action[1]
         v = np.clip(v, 0.0, 0.7)  # No backward driving
@@ -260,7 +263,7 @@ class PyBulletNavEnv(gym.Env):
         
         # Penalty for excessive rotation (prevents spiral behavior)
         # Based on IR-SIM: "No spiral behavior (excessive rotation penalty)"
-        abs_angular_vel = abs(w)
+        abs_angular_vel = abs(original_w)  # Use original action before clipping
         if abs_angular_vel > 1.5:  # Excessive rotation
             reward -= 0.5 * (abs_angular_vel - 1.5)
         
