@@ -372,81 +372,88 @@ def main():
             
             # Update camera view to robot's perspective for sensor panels
             # This feeds the RGB/Depth/Segmentation panels in the GUI
-            with perf_logger.time_operation('visualization'):
-                try:
-                    pos, orn = p.getBasePositionAndOrientation(robot.robot_id)
-                    
-                    # Calculate camera position behind and above robot
-                    rot_matrix = p.getMatrixFromQuaternion(orn)
-                    rot_matrix = np.array(rot_matrix).reshape(3, 3)
-                    camera_offset = rot_matrix @ np.array([-0.3, 0, 0.2])  # Behind and above
-                    camera_pos = np.array(pos) + camera_offset
-                    camera_target = np.array(pos) + rot_matrix @ np.array([1.0, 0, 0.05])  # Look ahead
-                    
-                    # Get camera images for sensor panels (RGB, Depth, Segmentation)
-                    # Only update every few frames to improve performance
-                    if step % 3 == 0:  # Update camera every 3 frames
-                        view_matrix = p.computeViewMatrix(
-                            cameraEyePosition=camera_pos.tolist(),
-                            cameraTargetPosition=camera_target.tolist(),
-                            cameraUpVector=[0, 0, 1]
-                        )
-                        proj_matrix = p.computeProjectionMatrixFOV(
-                            fov=60,
-                            aspect=1.0,
-                            nearVal=0.01,
-                            farVal=10.0
-                        )
+            # Only update visualization periodically to improve performance
+            if step % 5 == 0:  # Update visualization every 5 frames (reduce from every frame)
+                with perf_logger.time_operation('visualization'):
+                    try:
+                        pos, orn = p.getBasePositionAndOrientation(robot.robot_id)
                         
-                        # Get camera image - this feeds the RGB/Depth/Segmentation panels
-                        width, height, rgb_img, depth_img, seg_img = p.getCameraImage(
-                            width=320,
-                            height=240,
-                            viewMatrix=view_matrix,
-                            projectionMatrix=proj_matrix,
-                            renderer=p.ER_BULLET_HARDWARE_OPENGL
-                        )
-                except:
-                    pass  # Skip camera update if robot not available
-                
-                # Draw lidar visualization in 3D view
-                if step % 2 == 0:  # Update every 2 frames
-                    # Clear previous debug items (except path lines)
-                    for item in debug_items:
-                        try:
-                            p.removeUserDebugItem(item)
-                        except:
-                            pass
-                    debug_items.clear()
-                    
-                    # Draw lidar rays (every 6th ray to reduce clutter)
-                    num_rays = len(lidar)
-                    for i in range(0, num_rays, 6):  # Every 6th ray
-                        dist = lidar[i]
-                        angle = pose[2] + (2*np.pi * i / num_rays)
+                        # Calculate camera position behind and above robot
+                        rot_matrix = p.getMatrixFromQuaternion(orn)
+                        rot_matrix = np.array(rot_matrix).reshape(3, 3)
+                        camera_offset = rot_matrix @ np.array([-0.3, 0, 0.2])  # Behind and above
+                        camera_pos = np.array(pos) + camera_offset
+                        camera_target = np.array(pos) + rot_matrix @ np.array([1.0, 0, 0.05])  # Look ahead
                         
-                        start = [pose[0], pose[1], 0.11]
-                        end = [
-                            pose[0] + dist * np.cos(angle),
-                            pose[1] + dist * np.sin(angle),
-                            0.11
-                        ]
-                        
-                        # Color based on distance (red=close, green=far)
-                        intensity = min(1.0, dist / 5.0)
-                        color = [1.0 - intensity, intensity, 0.0]
-                        
-                        # Draw individual line
-                        try:
-                            line_id = p.addUserDebugLine(
-                                start, end,
-                                lineColorRGB=color,
-                                lineWidth=1.5,
-                                lifeTime=0.2
+                        # Get camera images for sensor panels (RGB, Depth, Segmentation)
+                        # Only update camera every 10 frames to improve performance
+                        if step % 10 == 0:  # Update camera every 10 frames (reduced from 3)
+                            view_matrix = p.computeViewMatrix(
+                                cameraEyePosition=camera_pos.tolist(),
+                                cameraTargetPosition=camera_target.tolist(),
+                                cameraUpVector=[0, 0, 1]
                             )
-                            debug_items.append(line_id)
-                        except:
-                            pass
+                            proj_matrix = p.computeProjectionMatrixFOV(
+                                fov=60,
+                                aspect=1.0,
+                                nearVal=0.01,
+                                farVal=10.0
+                            )
+                            
+                            # Get camera image - this feeds the RGB/Depth/Segmentation panels
+                            width, height, rgb_img, depth_img, seg_img = p.getCameraImage(
+                                width=320,
+                                height=240,
+                                viewMatrix=view_matrix,
+                                projectionMatrix=proj_matrix,
+                                renderer=p.ER_BULLET_HARDWARE_OPENGL
+                            )
+                    except:
+                        pass  # Skip camera update if robot not available
+                    
+                    # Draw lidar visualization in 3D view (every 10th ray, less frequent)
+                    if step % 10 == 0:  # Update lidar every 10 frames (reduced from 2)
+                        # Clear previous debug items (except path lines)
+                        for item in debug_items:
+                            try:
+                                p.removeUserDebugItem(item)
+                            except:
+                                pass
+                        debug_items.clear()
+                        
+                        # Draw lidar rays (every 10th ray to reduce clutter and computation)
+                        num_rays = len(lidar)
+                        for i in range(0, num_rays, 10):  # Every 10th ray (reduced from 6)
+                            if i >= num_rays:
+                                break
+                            dist = lidar[i]
+                            angle = pose[2] + (2*np.pi * i / num_rays)
+                            
+                            start = [pose[0], pose[1], 0.11]
+                            end = [
+                                pose[0] + dist * np.cos(angle),
+                                pose[1] + dist * np.sin(angle),
+                                0.11
+                            ]
+                            
+                            # Color based on distance (red=close, green=far)
+                            intensity = min(1.0, dist / 5.0)
+                            color = [1.0 - intensity, intensity, 0.0]
+                            
+                            # Draw individual line
+                            try:
+                                line_id = p.addUserDebugLine(
+                                    start, end,
+                                    lineColorRGB=color,
+                                    lineWidth=1.5,
+                                    lifeTime=0.5  # Longer lifetime so it persists
+                                )
+                                debug_items.append(line_id)
+                            except:
+                                pass
+            else:
+                # Still log timing even when skipping visualization
+                perf_logger.log_timing('visualization', 0.0)
             
             # Update navigation
             with perf_logger.time_operation('navigation_update'):
@@ -521,7 +528,7 @@ def main():
                           f"dist={dist:.2f}m | "
                           f"Cycle: {cycle_time:.1f}ms ({fps:.1f} FPS)")
                 else:
-                    dist = np.sqrt((goals[0][0]-pose[0])**2 + (goals[1]-pose[1])**2)
+                    dist = np.sqrt((goals[0][0]-pose[0])**2 + (goals[0][1]-pose[1])**2)
                     print(f"Step {step}: pos=({pose[0]:.2f}, {pose[1]:.2f}), "
                           f"dist_to_goal={dist:.2f}m | "
                           f"Cycle: {cycle_time:.1f}ms ({fps:.1f} FPS)")
