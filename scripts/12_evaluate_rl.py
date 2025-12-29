@@ -75,20 +75,27 @@ def evaluate(args):
             action, _ = model.predict(obs, deterministic=args.deterministic)
             
             # Step environment
-            obs, reward, terminated, truncated, info = env.step(action)
-            total_reward += reward
-            steps += 1
-            done = terminated or truncated
-            
-            # Render
-            if args.render:
-                env.render()
-                time.sleep(1/30)  # ~30 FPS
-            
-            # Print progress
-            if steps % 50 == 0:
-                print(f"  Step {steps}: dist={info['distance_to_goal']:.2f}m, "
-                      f"reward={total_reward:.1f}")
+            try:
+                obs, reward, terminated, truncated, info = env.step(action)
+                total_reward += reward
+                steps += 1
+                done = terminated or truncated
+                
+                # Render
+                if args.render:
+                    env.render()
+                    time.sleep(1/30)  # ~30 FPS
+                
+                # Print progress
+                if steps % 50 == 0:
+                    print(f"  Step {steps}: dist={info['distance_to_goal']:.2f}m, "
+                          f"reward={total_reward:.1f}")
+            except p.error as e:
+                if "Not connected to physics server" in str(e):
+                    print(f"\n  Warning: Physics server disconnected at step {steps}")
+                    break
+                else:
+                    raise
         
         # Calculate distance traveled
         final_pos = env.robot.get_pose()[:2]

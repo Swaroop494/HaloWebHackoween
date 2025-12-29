@@ -55,8 +55,9 @@ class PyBulletNavEnv(gym.Env):
         p.setTimeStep(1/240)
         
         # Action space: [v, w] - linear and angular velocity
+        # Forward-only movement (no backward driving) - based on IR-SIM approach
         self.action_space = spaces.Box(
-            low=np.array([-0.5, -2.0], dtype=np.float32),
+            low=np.array([0.0, -2.0], dtype=np.float32),  # No negative linear velocity
             high=np.array([0.7, 2.0], dtype=np.float32),
             dtype=np.float32
         )
@@ -212,9 +213,9 @@ class PyBulletNavEnv(gym.Env):
     
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict]:
         """Execute action."""
-        # Apply action (clamp to action space)
+        # Apply action (clamp to action space) - forward-only
         v, w = action[0], action[1]
-        v = np.clip(v, -0.5, 0.7)
+        v = np.clip(v, 0.0, 0.7)  # No backward driving
         w = np.clip(w, -2.0, 2.0)
         
         self.robot.set_velocity(v, w)
@@ -230,45 +231,38 @@ class PyBulletNavEnv(gym.Env):
         obs = self._get_obs()
         info = self._get_info()
         
-        # Compute reward
+        # Compute reward - Simple progress-based approach (based on IR-SIM)
         current_distance = info["distance_to_goal"]
         progress = self.prev_distance - current_distance
         self.prev_distance = current_distance
         
         reward = 0.0
         
-        # Shaped reward: distance-based (encourages getting closer)
-        # Larger reward when closer to goal
-        distance_reward = 1.0 / (1.0 + current_distance)  # 1.0 at goal, ~0.1 at 9m
-        reward += 5.0 * distance_reward
+        # Primary reward: Progress toward goal (simple and effective)
+        # This is the main signal - agent gets reward for getting closer
+        reward += 10.0 * progress  # Based on IR-SIM successful approach
         
-        # Progress reward (encourage moving toward goal) - increased weight
-        reward += 20.0 * progress  # Increased from 10.0
-        
-        # Bonus for making progress (even small)
-        if progress > 0.01:  # Moved at least 1cm closer
-            reward += 1.0
-        
-        # Goal reached reward (large bonus)
+        # Goal reached bonus
         if current_distance < self.goal_threshold:
-            reward += 200.0  # Increased from 100.0
+            reward += 100.0
         
-        # Time penalty (reduced - less harsh)
-        reward -= 0.01  # Reduced from 0.1 (10x less harsh)
+        # Small time penalty (encourage efficiency but not too harsh)
+        reward -= 0.01
         
         # Collision penalty
         if info["collision"]:
-            reward -= 30.0  # Reduced from 50.0
+            reward -= 50.0
         
-        # Obstacle penalty (based on lidar) - only for very close
+        # Obstacle proximity penalty (based on lidar)
         min_lidar = np.min(obs[5:41])  # Lidar readings in observation
-        if min_lidar < 0.2:  # Very close to obstacle (reduced threshold)
-            reward -= 3.0 * (0.2 - min_lidar)  # Reduced penalty
+        if min_lidar < 0.3:  # Close to obstacle
+            reward -= 2.0 * (0.3 - min_lidar)
         
-        # Penalty for getting stuck (not making progress for a while)
-        # This encourages exploration and escaping local minima
-        if abs(progress) < 0.01 and current_distance > 0.5:  # Stuck and not at goal
-            reward -= 0.5
+        # Penalty for excessive rotation (prevents spiral behavior)
+        # Based on IR-SIM: "No spiral behavior (excessive rotation penalty)"
+        abs_angular_vel = abs(w)
+        if abs_angular_vel > 1.5:  # Excessive rotation
+            reward -= 0.5 * (abs_angular_vel - 1.5)
         
         # Termination conditions (ensure Python bool, not numpy bool)
         terminated = bool(current_distance < self.goal_threshold)
