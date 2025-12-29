@@ -18,6 +18,7 @@ EnvironmentBuilder = env_builder_module.EnvironmentBuilder
 
 from scripts.diff_drive_robot import DiffDriveRobot
 from scripts.path_planner import AStarPlanner, RRTPlanner, PathFollower
+from scripts.localization_tracker import LocalizationTracker, PerformanceLogger
 
 
 class DynamicObstacleAvoidance:
@@ -88,7 +89,8 @@ class DynamicObstacleAvoidance:
         return obstacle_checker
     
     def plan_path(self, start: Tuple[float, float], goal: Tuple[float, float],
-                  robot_pose: np.ndarray, lidar_scan: np.ndarray) -> Optional[List[Tuple[float, float]]]:
+                  robot_pose: np.ndarray, lidar_scan: np.ndarray, 
+                  perf_logger=None) -> Optional[List[Tuple[float, float]]]:
         """
         Plan path from start to goal.
         
@@ -97,19 +99,28 @@ class DynamicObstacleAvoidance:
             goal: (x, y) goal position
             robot_pose: Current robot pose
             lidar_scan: Current lidar scan
+            perf_logger: Performance logger (optional)
             
         Returns:
             List of waypoints, or None if no path found
         """
-        if self.planner_type == 'astar':
-            # Create grid from lidar
-            grid, origin = self.planner.create_grid_from_lidar(robot_pose, lidar_scan)
-            path = self.planner.plan(start, goal, grid, origin)
-        else:
-            # RRT planning
-            bounds = ((-10, 10), (-10, 10))  # Workspace bounds
-            obstacle_checker = self.create_obstacle_checker(robot_pose, lidar_scan)
-            path = self.planner.plan(start, goal, bounds, obstacle_checker)
+        if perf_logger:
+            timing_context = perf_logger.time_operation('path_planning')
+            timing_context.__enter__()
+        
+        try:
+            if self.planner_type == 'astar':
+                # Create grid from lidar
+                grid, origin = self.planner.create_grid_from_lidar(robot_pose, lidar_scan)
+                path = self.planner.plan(start, goal, grid, origin)
+            else:
+                # RRT planning
+                bounds = ((-10, 10), (-10, 10))  # Workspace bounds
+                obstacle_checker = self.create_obstacle_checker(robot_pose, lidar_scan)
+                path = self.planner.plan(start, goal, bounds, obstacle_checker)
+        finally:
+            if perf_logger:
+                timing_context.__exit__(None, None, None)
         
         return path
     
@@ -146,7 +157,7 @@ class DynamicObstacleAvoidance:
         
         # Replan if needed
         if needs_replan:
-            path = self.plan_path(start, goal, robot_pose, lidar_scan)
+            path = self.plan_path(start, goal, robot_pose, lidar_scan, perf_logger=None)
             if path is not None:
                 self.current_path = path
                 self.path_follower.set_path(path)
@@ -331,6 +342,11 @@ def main():
     
     print("\nPress Ctrl+C to stop\n")
     
+    # Initialize tracking and performance logging
+    tracker = LocalizationTracker(save_trajectory=True)
+    tracker.start()
+    perf_logger = PerformanceLogger(log_interval=200)
+    
     step = 0
     max_steps = 20000
     all_goals_reached = False
@@ -339,96 +355,113 @@ def main():
     
     try:
         while step < max_steps and not all_goals_reached:
+            perf_logger.start_cycle()
+            
             # Get robot state
             try:
-                pose = robot.get_pose()
-                lidar = robot.get_lidar_scan()
+                with perf_logger.time_operation('sensor_read'):
+                    pose = robot.get_pose()
+                    lidar = robot.get_lidar_scan()
+                    odom_data = robot.get_odometry()
             except:
                 continue
             
+            # Update localization tracker
+            velocity = np.array([odom_data['velocity'][0], odom_data['velocity'][1], odom_data['velocity'][2]])
+            tracker.update(pose, velocity)
+            
             # Update camera view to robot's perspective for sensor panels
             # This feeds the RGB/Depth/Segmentation panels in the GUI
-            try:
-                pos, orn = p.getBasePositionAndOrientation(robot.robot_id)
+            with perf_logger.time_operation('visualization'):
+                try:
+                    pos, orn = p.getBasePositionAndOrientation(robot.robot_id)
+                    
+                    # Calculate camera position behind and above robot
+                    rot_matrix = p.getMatrixFromQuaternion(orn)
+                    rot_matrix = np.array(rot_matrix).reshape(3, 3)
+                    camera_offset = rot_matrix @ np.array([-0.3, 0, 0.2])  # Behind and above
+                    camera_pos = np.array(pos) + camera_offset
+                    camera_target = np.array(pos) + rot_matrix @ np.array([1.0, 0, 0.05])  # Look ahead
+                    
+                    # Get camera images for sensor panels (RGB, Depth, Segmentation)
+                    # Only update every few frames to improve performance
+                    if step % 3 == 0:  # Update camera every 3 frames
+                        view_matrix = p.computeViewMatrix(
+                            cameraEyePosition=camera_pos.tolist(),
+                            cameraTargetPosition=camera_target.tolist(),
+                            cameraUpVector=[0, 0, 1]
+                        )
+                        proj_matrix = p.computeProjectionMatrixFOV(
+                            fov=60,
+                            aspect=1.0,
+                            nearVal=0.01,
+                            farVal=10.0
+                        )
+                        
+                        # Get camera image - this feeds the RGB/Depth/Segmentation panels
+                        width, height, rgb_img, depth_img, seg_img = p.getCameraImage(
+                            width=320,
+                            height=240,
+                            viewMatrix=view_matrix,
+                            projectionMatrix=proj_matrix,
+                            renderer=p.ER_BULLET_HARDWARE_OPENGL
+                        )
+                except:
+                    pass  # Skip camera update if robot not available
                 
-                # Calculate camera position behind and above robot
-                rot_matrix = p.getMatrixFromQuaternion(orn)
-                rot_matrix = np.array(rot_matrix).reshape(3, 3)
-                camera_offset = rot_matrix @ np.array([-0.3, 0, 0.2])  # Behind and above
-                camera_pos = np.array(pos) + camera_offset
-                camera_target = np.array(pos) + rot_matrix @ np.array([1.0, 0, 0.05])  # Look ahead
-                
-                # Get camera images for sensor panels (RGB, Depth, Segmentation)
-                # Only update every few frames to improve performance
-                if step % 3 == 0:  # Update camera every 3 frames
-                    view_matrix = p.computeViewMatrix(
-                        cameraEyePosition=camera_pos.tolist(),
-                        cameraTargetPosition=camera_target.tolist(),
-                        cameraUpVector=[0, 0, 1]
-                    )
-                    proj_matrix = p.computeProjectionMatrixFOV(
-                        fov=60,
-                        aspect=1.0,
-                        nearVal=0.01,
-                        farVal=10.0
-                    )
+                # Draw lidar visualization in 3D view
+                if step % 2 == 0:  # Update every 2 frames
+                    # Clear previous debug items (except path lines)
+                    for item in debug_items:
+                        try:
+                            p.removeUserDebugItem(item)
+                        except:
+                            pass
+                    debug_items.clear()
                     
-                    # Get camera image - this feeds the RGB/Depth/Segmentation panels
-                    width, height, rgb_img, depth_img, seg_img = p.getCameraImage(
-                        width=320,
-                        height=240,
-                        viewMatrix=view_matrix,
-                        projectionMatrix=proj_matrix,
-                        renderer=p.ER_BULLET_HARDWARE_OPENGL
-                    )
-            except:
-                pass  # Skip camera update if robot not available
-            
-            # Draw lidar visualization in 3D view
-            if step % 2 == 0:  # Update every 2 frames
-                # Clear previous debug items (except path lines)
-                for item in debug_items:
-                    try:
-                        p.removeUserDebugItem(item)
-                    except:
-                        pass
-                debug_items.clear()
-                
-                # Draw lidar rays (every 6th ray to reduce clutter)
-                num_rays = len(lidar)
-                for i in range(0, num_rays, 6):  # Every 6th ray
-                    dist = lidar[i]
-                    angle = pose[2] + (2*np.pi * i / num_rays)
-                    
-                    start = [pose[0], pose[1], 0.11]
-                    end = [
-                        pose[0] + dist * np.cos(angle),
-                        pose[1] + dist * np.sin(angle),
-                        0.11
-                    ]
-                    
-                    # Color based on distance (red=close, green=far)
-                    intensity = min(1.0, dist / 5.0)
-                    color = [1.0 - intensity, intensity, 0.0]
-                    
-                    # Draw individual line
-                    line_id = p.addUserDebugLine(
-                        start, end,
-                        lineColorRGB=color,
-                        lineWidth=1.5,
-                        lifeTime=0.2
-                    )
-                    debug_items.append(line_id)
+                    # Draw lidar rays (every 6th ray to reduce clutter)
+                    num_rays = len(lidar)
+                    for i in range(0, num_rays, 6):  # Every 6th ray
+                        dist = lidar[i]
+                        angle = pose[2] + (2*np.pi * i / num_rays)
+                        
+                        start = [pose[0], pose[1], 0.11]
+                        end = [
+                            pose[0] + dist * np.cos(angle),
+                            pose[1] + dist * np.sin(angle),
+                            0.11
+                        ]
+                        
+                        # Color based on distance (red=close, green=far)
+                        intensity = min(1.0, dist / 5.0)
+                        color = [1.0 - intensity, intensity, 0.0]
+                        
+                        # Draw individual line
+                        try:
+                            line_id = p.addUserDebugLine(
+                                start, end,
+                                lineColorRGB=color,
+                                lineWidth=1.5,
+                                lifeTime=0.2
+                            )
+                            debug_items.append(line_id)
+                        except:
+                            pass
             
             # Update navigation
-            if multi_goal:
-                v, w, all_goals_reached = navigator.update(pose, lidar)
-            else:
-                v, w, goal_reached = navigator.update(pose, goals[0], lidar, time.time())
-                all_goals_reached = goal_reached
+            with perf_logger.time_operation('navigation_update'):
+                if multi_goal:
+                    v, w, all_goals_reached = navigator.update(pose, lidar)
+                else:
+                    v, w, goal_reached = navigator.update(pose, goals[0], lidar, time.time())
+                    all_goals_reached = goal_reached
             
             if all_goals_reached:
                 print(f"\n✓ All goals reached at step {step}!")
+                # Print final statistics
+                perf_logger.print_statistics()
+                tracker.print_statistics()
+                tracker.save_trajectory_to_file()
                 break
             
             # Visualize path (only update periodically to reduce computation)
@@ -463,36 +496,63 @@ def main():
                             pass  # Skip if disconnected
             
             # Apply control
-            robot.set_velocity(v, w)
+            with perf_logger.time_operation('control_apply'):
+                robot.set_velocity(v, w)
             
             # Step simulation
-            for _ in range(10):
-                p.stepSimulation()
+            with perf_logger.time_operation('physics_step'):
+                for _ in range(10):
+                    p.stepSimulation()
             
+            perf_logger.end_cycle()
             step += 1
             
-            # Print status
+            # Print status with performance info
             if step % 200 == 0:
+                stats = perf_logger.get_statistics()
+                cycle_time = stats['total_cycle']['mean'] * 1000 if stats['total_cycle'] else 0
+                fps = 1.0 / stats['total_cycle']['mean'] if stats['total_cycle'] and stats['total_cycle']['mean'] > 0 else 0
+                
                 if multi_goal:
                     current_goal = navigator.goals[navigator.current_goal_idx] if navigator.current_goal_idx < len(navigator.goals) else None
                     dist = np.sqrt((current_goal[0]-pose[0])**2 + (current_goal[1]-pose[1])**2) if current_goal else 0
                     print(f"Step {step}: pos=({pose[0]:.2f}, {pose[1]:.2f}), "
                           f"goal {navigator.current_goal_idx+1}/{len(navigator.goals)}, "
-                          f"dist={dist:.2f}m")
+                          f"dist={dist:.2f}m | "
+                          f"Cycle: {cycle_time:.1f}ms ({fps:.1f} FPS)")
                 else:
                     dist = np.sqrt((goals[0][0]-pose[0])**2 + (goals[1]-pose[1])**2)
                     print(f"Step {step}: pos=({pose[0]:.2f}, {pose[1]:.2f}), "
-                          f"dist_to_goal={dist:.2f}m")
+                          f"dist_to_goal={dist:.2f}m | "
+                          f"Cycle: {cycle_time:.1f}ms ({fps:.1f} FPS)")
+                
+                # Print detailed performance stats periodically
+                if perf_logger.should_log():
+                    perf_logger.print_statistics()
+                    tracker_stats = tracker.get_statistics()
+                    print(f"\nDistance traveled: {tracker_stats['total_distance']:.2f}m, "
+                          f"Avg speed: {tracker_stats['avg_velocity']:.3f} m/s")
             
             time.sleep(1/60)
         
         if not all_goals_reached:
             print(f"\nMax steps reached ({max_steps}).")
+        
+        # Print final statistics
+        perf_logger.print_statistics()
+        tracker.print_statistics()
+        tracker.save_trajectory_to_file()
     
     except KeyboardInterrupt:
         print("\nStopped by user")
+        # Print statistics even on interrupt
+        perf_logger.print_statistics()
+        tracker.print_statistics()
+        tracker.save_trajectory_to_file()
     except Exception as e:
         print(f"\nError: {e}")
+        perf_logger.print_statistics()
+        tracker.print_statistics()
     
     try:
         p.disconnect()
