@@ -256,9 +256,9 @@ class PyBulletNavEnv(gym.Env):
         if min_lidar < 0.3:  # Very close to obstacle
             reward -= 5.0 * (0.3 - min_lidar)
         
-        # Termination conditions
-        terminated = current_distance < self.goal_threshold
-        truncated = self.step_count >= self.max_steps
+        # Termination conditions (ensure Python bool, not numpy bool)
+        terminated = bool(current_distance < self.goal_threshold)
+        truncated = bool(self.step_count >= self.max_steps)
         
         # Truncate on collision (severe collision)
         if info["collision"]:
