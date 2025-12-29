@@ -162,6 +162,32 @@ Tests robot navigation with PID-based obstacle avoidance in different environmen
 - **Sensor Visualization**: RGB, depth, and segmentation views in PyBullet GUI tabs
 - **Lidar Visualization**: Colored rays in 3D view (red=close, green=far)
 
+### 7. Advanced Navigation with Path Planning
+
+```bash
+# Single goal with A* planner
+python scripts/10_advanced_navigation.py astar
+
+# Single goal with RRT planner
+python scripts/10_advanced_navigation.py rrt
+
+# Multi-goal navigation (visits multiple waypoints)
+python scripts/10_advanced_navigation.py astar --multi
+python scripts/10_advanced_navigation.py rrt --multi
+```
+
+Advanced navigation features with path planning algorithms:
+
+**Path Planning Algorithms:**
+- **A* (A-Star)**: Grid-based optimal path planning
+- **RRT (Rapidly-exploring Random Tree)**: Continuous space path planning
+
+**Features:**
+- **Dynamic Obstacle Avoidance**: Replans path when obstacles detected
+- **Path Visualization**: Blue lines show planned path in 3D view
+- **Multi-Goal Navigation**: Visit multiple waypoints in sequence
+- **Path Following**: Smooth waypoint following with lookahead distance
+
 ## Robot Specifications
 
 - **Type**: Differential drive robot
@@ -189,6 +215,8 @@ Tests robot navigation with PID-based obstacle avoidance in different environmen
 | `04_sensor_logger.py` | Record sensor data for analysis |
 | `05_environment_builder.py` | Build warehouse/street/maze environments |
 | `06_navigate_environment.py` | Navigate with PID controller and obstacle avoidance |
+| `10_advanced_navigation.py` | Advanced navigation with A*/RRT path planning |
+| `path_planner.py` | Path planning algorithms (A*, RRT, PathFollower) |
 | `diagnose_pybullet.py` | Diagnose installation issues |
 
 ## API Usage
