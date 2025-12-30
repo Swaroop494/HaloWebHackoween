@@ -230,10 +230,74 @@ Advanced navigation features with path planning algorithms:
 | `10_advanced_navigation.py` | Advanced navigation with A*/RRT path planning |
 | `11_train_rl.py` | Train RL agent (PPO, SAC, TD3) |
 | `12_evaluate_rl.py` | Evaluate trained RL models |
-| `path_planner.py` | Path planning algorithms (A*, RRT, PathFollower) |
-| `pybullet_nav_env.py` | Gymnasium environment wrapper for RL |
-| `localization_tracker.py` | Robot pose and velocity tracking |
-| `diagnose_pybullet.py` | Diagnose installation issues |
+
+### 8. Reinforcement Learning Training
+
+Train a reinforcement learning agent to navigate to goals:
+
+```bash
+# Train PPO agent (default)
+python scripts/11_train_rl.py --algorithm ppo --timesteps 1000000 --num-envs 4
+
+# Train with specific environment
+python scripts/11_train_rl.py --algorithm ppo --env-type warehouse --timesteps 1000000
+
+# Use Apple Silicon GPU (M1/M2/M3)
+python scripts/11_train_rl.py --algorithm ppo --device mps --timesteps 1000000
+
+# Train other algorithms
+python scripts/11_train_rl.py --algorithm sac --timesteps 1000000
+python scripts/11_train_rl.py --algorithm td3 --timesteps 1000000
+```
+
+**Training Options:**
+- `--algorithm`: PPO (default), SAC, or TD3
+- `--env-type`: warehouse (default), street, or maze
+- `--timesteps`: Total training timesteps (default: 1,000,000)
+- `--num-envs`: Number of parallel environments (default: 4)
+- `--device`: auto (default), mps, cuda, or cpu
+- `--learning-rate`: Learning rate (default: 3e-4)
+- `--seed`: Random seed for reproducibility
+
+**Training Output:**
+- Models saved to `models/` directory
+- Best model: `models/best_model.zip`
+- Final model: `models/{algorithm}_{env_type}_final.zip`
+- Checkpoints: `models/checkpoints/`
+- TensorBoard logs: `logs/tensorboard/`
+
+### 9. Evaluate Trained RL Models
+
+Evaluate trained models:
+
+```bash
+# Evaluate with default settings (auto-detects best model)
+python scripts/12_evaluate_rl.py --algorithm ppo --env-type warehouse --num-episodes 5
+
+# Evaluate with rendering
+python scripts/12_evaluate_rl.py --algorithm ppo --env-type warehouse --num-episodes 5 --render
+
+# Evaluate specific model
+python scripts/12_evaluate_rl.py --algorithm ppo --model-path models/best_model --num-episodes 10
+```
+
+**Evaluation Options:**
+- `--algorithm`: PPO, SAC, or TD3
+- `--env-type`: warehouse (default), street, or maze
+- `--model-path`: Path to specific model (default: auto-detect)
+- `--num-episodes`: Number of evaluation episodes (default: 10)
+- `--render`: Enable PyBullet GUI visualization
+- `--deterministic`: Use deterministic policy (default: True)
+
+**Current Performance (Latest Training):**
+- **Success Rate**: 5/5 (100.0%)
+- **Average Reward**: 57.43 ± 3.83
+- **Average Episode Length**: 164.0 ± 57.9 steps
+- **Average Distance Traveled**: 3.06m ± 1.09m
+- **Algorithm**: PPO (Proximal Policy Optimization)
+- **Environment**: Warehouse (31 obstacles)
+- **Observation Space**: 43 dimensions (dx, dy, dtheta, distance, v, w, lidar[36], min_lidar)
+- **Action Space**: [linear_velocity, angular_velocity] - forward-only (no backward driving)
 
 ## API Usage
 
@@ -295,13 +359,44 @@ See [INSTALL.md](INSTALL.md) for detailed troubleshooting:
 - Ensure PyTorch is installed: `pip install torch` (should include MPS support by default)
 - GPU acceleration can significantly speed up training compared to CPU
 
+## RL Training Results
+
+### Current Performance
+
+**Latest Training Run** (PPO, Warehouse Environment):
+- ✅ **Success Rate**: 5/5 (100.0%)
+- ✅ **Average Reward**: 57.43 ± 3.83
+- ✅ **Average Episode Length**: 164.0 ± 57.9 steps
+- ✅ **Average Distance Traveled**: 3.06m ± 1.09m
+
+**Reward Function**:
+- Progress-based: Primary reward for distance reduction
+- Heading alignment: Small reward for facing goal when far
+- Goal bonus: +50.0 when reached
+- Collision penalty: -10.0
+- Time penalty: -0.01 (encourages efficiency)
+
+**Observation Space**: 43 dimensions
+- Relative goal position (dx, dy, dtheta)
+- Distance to goal
+- Current velocities (v, w)
+- Lidar scan (36 rays)
+- Minimum lidar distance
+
+**Action Space**: [linear_velocity, angular_velocity]
+- Forward-only movement (no backward driving)
+- Linear: 0.0 to 0.7 m/s
+- Angular: -2.0 to 2.0 rad/s
+
 ## Next Steps
 
 - [x] Environment Setup: Create warehouse/street environments with obstacles
 - [x] Advanced Navigation: Implement path planning and obstacle avoidance
 - [x] RL Training: Set up Gymnasium environment for reinforcement learning
+- [x] Reward Function Optimization: Achieved 100% success rate with simplified reward
 - [ ] Hyperparameter tuning for RL algorithms
 - [ ] Curriculum learning for harder environments
+- [ ] Multi-environment training (warehouse + street + maze)
 - [ ] Sim-to-Real: Prepare for real robot deployment
 
 ## Contributing
