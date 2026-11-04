@@ -16,13 +16,17 @@ def main():
                         help="vision model provider (default: groq)")
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--gui", action="store_true", help="show the same HTTP-controlled simulation in PyBullet GUI")
     parser.add_argument("--max-steps", type=int, default=60)
     parser.add_argument("--command", default="Fetch the requested object and deliver it to the marked zone.")
+    parser.add_argument("--force", action="store_true", help="allow a real model run after the 120-run development limit")
     args = parser.parse_args()
     if not 1 <= args.max_steps <= 60:
         parser.error("--max-steps must be between 1 and 60")
     env = os.environ.copy()
     env["FETCH_SEED"] = str(args.seed)
+    env["FETCH_GUI"] = "true" if args.gui else "false"
+    env["FETCH_COMMAND"] = args.command
     project_dir = Path(__file__).resolve().parent
     server = subprocess.Popen([sys.executable, "-m", "uvicorn", "api.fetch_server:app", "--host", "127.0.0.1", "--port", str(args.port)], env=env, cwd=project_dir)
     try:
@@ -46,13 +50,13 @@ def main():
                 raise RuntimeError(f"Set {key_name} or use --dummy")
             counter_path = project_dir / "logs" / "run_count.txt"
             count = int(counter_path.read_text(encoding="utf-8").strip()) if counter_path.exists() else 0
-            if count >= 120:
+            if count >= 120 and not args.force:
                 raise RuntimeError("The 120-run development limit has been reached")
             counter_path.parent.mkdir(parents=True, exist_ok=True)
             counter_path.write_text(f"{count + 1}\n", encoding="utf-8")
         from agent.claude_agent import run_agent
         result = run_agent(args.command, base_url=f"http://127.0.0.1:{args.port}", dummy=args.dummy,
-                           max_steps=args.max_steps, provider=args.provider)
+                           max_steps=args.max_steps, provider=args.provider, seed=args.seed)
         print(result)
     finally:
         server.terminate()

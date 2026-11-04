@@ -1,27 +1,34 @@
-# Status
+# Membrane Fetch Status
 
-## Membrane Fetch implementation
+## Working
 
-- Reuses `scripts/diff_drive_robot.py` and `urdf/diff_drive_robot.urdf`; loaded driven wheel joint IDs are left `0` and right `1`.
-- Added a seeded six-object room, four walls, floor, marked drop zone, fixed-constraint pickup, internal delivery validation, and the `IDLE` through `DONE` / `BLOCKED` state machine with three-retry collision recovery.
-- Added the single-owner-thread FastAPI server and routes in `api/fetch_server.py` / `engine/fetch_server.py`. Camera output is 640×480 at 90° horizontal FOV, mounted 0.5 m above the floor with 10° downward tilt. Depth remains disabled unless explicitly approved.
-- Added the Claude tool loop, image-only camera input, latest-frame handling, JSONL/PNG logging, and `run_fetch.py` launcher.
-- Added a Groq vision path (default model `qwen/qwen3.8-27b`) using one strict-schema action per decision; Claude remains selectable with `--provider claude` and uses native tool calls. Both send the simulated JPEG as image content and execute one action per decision.
-- Added `scripts/preview_fetch_scene.py` to open the room and robot in the PyBullet GUI without an AI key. The preview was launched for inspection.
-- Updated `README.md` with exact PowerShell commands for previewing the scene, Groq tests, switching to Claude, existing examples, and tests.
+- The task reuses `scripts/diff_drive_robot.py` and `urdf/diff_drive_robot.urdf` with the existing wheel joints. The onboard rendered camera is 640×480 with 90° horizontal FOV, 0.5 m height, and 10° downward tilt.
+- The engine owns the seeded room, object metadata, target resolution, collision checks, fixed-constraint pickup, delivery validation, and task outcome. The HTTP schemas expose robot status and action results; they do not expose object IDs, attributes, positions, counts, segmentation, or drop-zone coordinates.
+- Pickup checks the 0.5 m front reach and ±30° heading cone, attaches with a PyBullet fixed constraint, filters collisions only between the held object and robot links, and restores collisions on release. The marked drop zone is visual-only. A drop is settled to floor height and validated internally without advancing physics outside move/turn actions.
+- `run_fetch.py --gui` opens the same HTTP-controlled simulation in the PyBullet GUI. The one-key local physics demonstration is:
+
+  ```powershell
+  python scripts/visual_pickup_demo.py --seed 1234
+  ```
+
+  This scripted demonstration completed in the GUI: the existing robot approached, picked up with a fixed constraint, carried the object, released it in the marked zone, and the engine reported validation pass. It is a physics demonstration, not an AI vision run.
+- The agent sends the simulated JPEG as image content, enforces one action tool call per decision, fetches a fresh frame after each move/turn, retains the latest image and recent action summaries, and reports success only when the engine ends with `pass` after an in-zone release.
+- The engine internally resolves supported target criteria (including a unique warm-color sphere, tallest object, and blue box). An in-zone delivery only passes when the held body matches the resolved target; an unresolved or ambiguous instruction cannot pass accidentally.
+- Each run writes JSONL action records, PNG frames, and `meta.json`. Unpriced usage is recorded as unknown rather than zero. Real model runs are capped at 120 unless `--force` is supplied; the soft 25-action limit warns, and the hard limit remains 60.
 
 ## Verification
 
-- `python -m pytest -q`: 8 passed, including Groq image payload conversion and rate-limit wait parsing.
-- `python -m py_compile` on the changed Python modules: passed.
-- HTTP smoke checks covered state, camera image dimensions, move, turn, pickup, drop, depth gating, collision, recovery, and internal drop validation.
-- `python run_fetch.py --dummy --seed 73 --port 8081 --max-steps 1`: launcher, camera capture, action, refreshed frame, and logging succeeded.
-- Groq uses the documented vision-capable Qwen model and image-plus-tool request format; no Groq key was present, so no provider request was sent.
-- Added bounded Groq HTTP 429 retries that honor `Retry-After` or the wait duration in the error message.
-- A live one-action Groq run completed on port 8081: image sent, a schema-valid turn selected and executed, and a fresh image fetched.
+- `python -m py_compile` on the modified modules passed.
+- `python -m pytest -q`: 15 passed.
+- After tightening target validation so an unresolved instruction cannot produce a false pass, `python -m pytest -q`: 15 passed.
+- Seed 1234 full physics rehearsal passed: approach, fixed-constraint pickup, carry route, release, and internal in-zone validation.
+- The visible GUI demo completed and was inspected after placement.
+- Three natural-language target criteria resolve internally on the acceptance seed. The test does not claim the vision model completed those commands.
+- No `ANTHROPIC_API_KEY` or `GROQ_API_KEY` was configured during this session, so no live Claude/Groq request or three-command model acceptance run was performed.
 
-## Limits
+## Remaining PRD Work
 
-- Port 8080 was occupied by another listener during verification; the new launcher was verified on port 8081. Use `--port 8081` or stop the existing listener before using the default port.
-- The provided Groq key enabled a one-action test, but no full Fetch run was attempted. The key was supplied in chat and should be rotated before further use. No key was written to the repository or logs. No Anthropic key was available, so Claude was not tested.
-- Existing scripts `05_environment_builder.py` and `06_navigate_environment.py` were run during inspection but currently fail in this environment (PyBullet data path and Windows console encoding, respectively). `03_sensor_streams.py` starts its interactive loop and must be interrupted with `Ctrl+C`.
+- Run three live vision-model commands after a valid API key is configured; confirm pixel-based target selection in the resulting logs.
+- The PRD obstacle stretch scenario and POV video/clip pipeline are not implemented or verified.
+- Prompt-cache usage and priced per-run model cost are not verified; cost is logged as `null` until a pricing source is configured.
+

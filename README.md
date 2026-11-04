@@ -14,6 +14,14 @@ python scripts/preview_fetch_scene.py --seed 1234
 
 This opens the PyBullet GUI with the four-walled room, floor, six objects, marked drop zone, and the existing differential-drive robot. Close the GUI window or press `Ctrl+C` to exit. Change the seed to view a different layout.
 
+To watch a no-key physics demonstration that drives, picks up with a PyBullet fixed constraint, carries the object to the marked area, and validates the release, run:
+
+```powershell
+python scripts/visual_pickup_demo.py --seed 1234
+```
+
+This is a deterministic engine demonstration, not a vision-model run. To watch the HTTP-controlled agent simulation, add `--gui` to `run_fetch.py` after configuring an API key; the same API/agent actions then drive the visible PyBullet world.
+
 ### Run a Fetch test with Groq (PowerShell)
 
 Install dependencies once, then set your Groq key in PowerShell. The key stays in the environment and is not written to the repository:
@@ -21,7 +29,7 @@ Install dependencies once, then set your Groq key in PowerShell. The key stays i
 ```powershell
 python -m pip install -r requirements.txt
 $env:GROQ_API_KEY = "YOUR_GROQ_API_KEY"
-python run_fetch.py --provider groq --command "Fetch the item described here"
+python run_fetch.py --gui --provider groq --command "Bring the tallest object to the marked area"
 ```
 
 The default Groq vision model is `qwen/qwen3.8-27b`; override it with `$env:GROQ_MODEL`. Groq returns one strict-schema action per decision, which the local agent executes once. Claude uses native tool calls. The API starts on `127.0.0.1:8080`. Leave the terminal open during the run. Use `--seed 1234` to reproduce a scene and `--max-steps 25` to bound a test. Groq 429 rate-limit responses are retried using the server's wait hint, up to four times.
@@ -32,7 +40,7 @@ When you have an Anthropic key, set it and select the Claude provider:
 
 ```powershell
 $env:ANTHROPIC_API_KEY = "YOUR_ANTHROPIC_API_KEY"
-python run_fetch.py --provider claude --command "Fetch the item described here"
+python run_fetch.py --gui --provider claude --command "Bring the tallest object to the marked area"
 ```
 
 ### Port and no-key options

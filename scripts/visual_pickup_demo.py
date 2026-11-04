@@ -41,7 +41,7 @@ def _path_clear(start, goal, target, environment) -> bool:
 def _carry_path(start, goal, carried_body, environment):
     """Plan a collision-clear grid route while keeping the held body in front."""
     cell = 0.2
-    limit = config.ROOM_SIZE / 2 - 0.68
+    limit = config.ROOM_SIZE / 2 - 1.0
     count = round(2 * limit / cell)
     coords = [-limit + i * cell for i in range(count + 1)]
 
@@ -100,7 +100,8 @@ def _carry_path(start, goal, carried_body, environment):
 
 
 def _animated_route(robot, points) -> bool:
-    for target in points[1:]:
+    for waypoint_index, target in enumerate(points[1:], start=1):
+        print(f"Carry waypoint {waypoint_index}/{len(points) - 1}.", flush=True)
         pose = robot.get_pose()
         dx, dy = target[0] - pose[0], target[1] - pose[1]
         distance = math.hypot(dx, dy)
@@ -108,7 +109,13 @@ def _animated_route(robot, points) -> bool:
             continue
         desired = math.atan2(dy, dx)
         delta = math.degrees((desired - float(pose[2]) + math.pi) % (2 * math.pi) - math.pi)
-        if not _animated_turn(robot, delta) or not _animated_drive(robot, distance):
+        turned = _animated_turn(robot, delta)
+        print(f"Carry turn complete: {turned}.", flush=True)
+        if not turned:
+            return False
+        moved = _animated_drive(robot, distance)
+        print(f"Carry move complete: {moved}.", flush=True)
+        if not moved:
             return False
     return True
 
@@ -159,6 +166,7 @@ def main():
         raise RuntimeError("Could not open the PyBullet GUI")
     try:
         environment = FetchEnvironment(args.seed).build()
+        print("Fetch room initialized.", flush=True)
         sx, sy, heading = environment.robot_start
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         robot = DiffDriveRobot(os.path.join(root, "urdf", "diff_drive_robot.urdf"),
@@ -178,8 +186,9 @@ def main():
                 continue
             ux, uy = (ox - sx) / distance, (oy - sy) / distance
             goal = (ox - 0.48 * ux, oy - 0.48 * uy)
-            if _path_clear((sx, sy), goal, body, environment):
+            if max(abs(goal[0]), abs(goal[1])) <= 1.6 and _path_clear((sx, sy), goal, body, environment):
                 candidates.append((math.dist((sx, sy), goal), body, goal, math.atan2(uy, ux)))
+        print(f"Clear approach options: {len(candidates)}.", flush=True)
 
         if not candidates:
             print("No clear straight pickup approach for this seed. Try --seed 42 or another seed.")
@@ -207,8 +216,11 @@ def main():
                 ux, uy = dx / drop_distance, dy / drop_distance
                 drop_goal = (environment.drop_center[0] - 0.42 * ux,
                              environment.drop_center[1] - 0.42 * uy)
+                print("Planning the carry route.", flush=True)
                 route = _carry_path(robot_pose[:2], drop_goal, manager.held_body, environment)
+                print(f"Carry route ready: {route is not None}.", flush=True)
                 transported = route is not None and _animated_route(robot, route)
+                print(f"Carry motion complete: {transported}.", flush=True)
                 if transported:
                     # Align the held body with the centre of the marked area.
                     final_pose = robot.get_pose()
@@ -225,11 +237,16 @@ def main():
             else:
                 print("The scene is paused for inspection. Close the window to exit.")
 
+        print("Simulation is idle; GUI remains open.", flush=True)
         while p.isConnected(client_id):
             p.getCameraImage(1, 1)
             time.sleep(0.1)
     except KeyboardInterrupt:
         pass
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        raise
     finally:
         if p.isConnected(client_id):
             p.disconnect(client_id)
