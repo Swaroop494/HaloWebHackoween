@@ -21,10 +21,16 @@ def _image_block(payload: bytes) -> dict:
             "data": base64.b64encode(payload).decode("ascii")}}
 
 
-def _status_text(command: str, state: dict, last_result: dict | None) -> str:
-    return (f"Command: {command}\nState: {state.get('state')}\n"
+def _status_text(command: str, state: dict, last_result: dict | None,
+                 step: int = 0, history: list[dict] | None = None) -> str:
+    recent = (history or [])[-5:]
+    summaries = [f"{item['action']}: {json.dumps(item['result'], separators=(',', ':'))}"
+                 for item in recent]
+    return (f"Command: {command}\nStep: {step}\nState: {state.get('state')}\n"
+            f"Robot pose: x={state.get('x')}, y={state.get('y')}, heading_deg={state.get('heading_deg')}\n"
             f"Holding: {state.get('holding')}\nCollision: {state.get('collided')}\n"
-            f"Retries: {state.get('retry_count')}\nLast action result: {last_result or 'none'}")
+            f"Retries: {state.get('retry_count')}\nLast action result: {last_result or 'none'}\n"
+            f"Last five actions: {' | '.join(summaries) if summaries else 'none'}")
 
 
 def _keep_latest_image(messages: list[dict]) -> None:
@@ -159,7 +165,7 @@ def _groq_retry_delay(response, attempt: int) -> float:
 
 
 def run_agent(command: str, base_url: str | None = None, dummy: bool = False,
-              max_steps: int = 60, provider: str = "claude") -> dict:
+              max_steps: int = 60, provider: str = "claude", seed: int | None = None) -> dict:
     """Run the visual Fetch loop using Claude, Groq, or plumbing-only dummy mode."""
     max_steps = min(max(1, max_steps), 60)
     if dummy:
@@ -187,7 +193,7 @@ def run_agent(command: str, base_url: str | None = None, dummy: bool = False,
     state = client.state()
     image, _ = client.look()
     messages: list[dict] = [{"role": "user", "content": [
-        {"type": "text", "text": _status_text(command, state, None)}, _image_block(image)]}]
+        {"type": "text", "text": _status_text(command, state, None, 0)}, _image_block(image)]}]
     last_result = None
     verified_delivery = False
     history: list[dict] = []
@@ -195,6 +201,8 @@ def run_agent(command: str, base_url: str | None = None, dummy: bool = False,
     for _ in range(max_steps):
         if state.get("state") == "DONE":
             break
+        if logger.step == 25:
+            print("Soft limit reached (25 actions); continuing toward the 60-action hard limit.")
         if state.get("state") == "BLOCKED":
             # Engine has stopped motion and recorded a retry. Recover with one
             # bounded reverse action, then a small turn before asking the model
@@ -256,18 +264,21 @@ def run_agent(command: str, base_url: str | None = None, dummy: bool = False,
                       tokens_in, tokens_out)
         last_result = result
         history.append({"action": tool, "result": result,
-                        "observation": args.get("what_i_see"), "state": state.get("state")})
+                        "observation": args.get("what_i_see"), "state": state.get("state"),
+                        "tokens_in": tokens_in, "tokens_out": tokens_out})
         if tool == "drop":
-            verified_delivery = bool(result.get("success", False))
+            verified_delivery = bool(result.get("in_zone", False))
         if tool in ("move", "turn"):
             image, _ = client.look()
-            next_user_content = [{"type": "text", "text": _status_text(command, state, last_result)}]
+            next_user_content = [{"type": "text", "text": _status_text(command, state, last_result,
+                                                                           logger.step, history)}]
             if provider != "groq":
                 next_user_content.insert(0, {"type": "tool_result", "tool_use_id": decision["id"],
                                              "content": str(result)})
             next_user_content.append(_image_block(image))
         else:
-            next_user_content = [{"type": "text", "text": _status_text(command, state, last_result)}]
+            next_user_content = [{"type": "text", "text": _status_text(command, state, last_result,
+                                                                           logger.step, history)}]
             if provider != "groq":
                 next_user_content.insert(0, {"type": "tool_result", "tool_use_id": decision["id"],
                                              "content": str(result)})
@@ -277,8 +288,13 @@ def run_agent(command: str, base_url: str | None = None, dummy: bool = False,
             _keep_latest_image(messages)
         if state.get("state") == "DONE":
             break
-    complete = verified_delivery and state.get("state") == "DONE"
-    outcome = "success" if complete else ("failed" if state.get("state") == "DONE" else "incomplete")
+    complete = (verified_delivery and state.get("state") == "DONE" and
+                state.get("outcome") == "pass")
+    outcome = state.get("outcome") if state.get("state") == "DONE" else "incomplete"
+    outcome = outcome or ("pass" if complete else "fail_not_reached")
+    logger.finalize(seed=seed, outcome=outcome, total_tokens_in=sum(
+        item.get("tokens_in", 0) for item in history), total_tokens_out=sum(
+        item.get("tokens_out", 0) for item in history))
     return {"outcome": outcome, "state": state.get("state"),
             "retry_count": state.get("retry_count"), "steps": logger.step,
             "run_id": run_id, "last_action_result": last_result,
