@@ -1,5 +1,78 @@
 # PyBullet Differential Drive Robot Simulation
 
+## Membrane Robot Fetch Demo
+
+The Fetch task reuses the existing differential-drive URDF and PyBullet physics. It uses the onboard simulated camera (640×480, 90° horizontal field of view); no webcam is used.
+
+### Preview the room and scene
+
+You can inspect the room without either API key. From the repository root, run:
+
+```powershell
+python scripts/preview_fetch_scene.py --seed 1234
+```
+
+This opens the PyBullet GUI with the four-walled room, floor, six objects, marked drop zone, and the existing differential-drive robot. Close the GUI window or press `Ctrl+C` to exit. Change the seed to view a different layout.
+
+### Run a Fetch test with Groq (PowerShell)
+
+Install dependencies once, then set your Groq key in PowerShell. The key stays in the environment and is not written to the repository:
+
+```powershell
+python -m pip install -r requirements.txt
+$env:GROQ_API_KEY = "YOUR_GROQ_API_KEY"
+python run_fetch.py --provider groq --command "Fetch the item described here"
+```
+
+The default Groq vision model is `qwen/qwen3.8-27b`; override it with `$env:GROQ_MODEL`. Groq returns one strict-schema action per decision, which the local agent executes once. Claude uses native tool calls. The API starts on `127.0.0.1:8080`. Leave the terminal open during the run. Use `--seed 1234` to reproduce a scene and `--max-steps 25` to bound a test. Groq 429 rate-limit responses are retried using the server's wait hint, up to four times.
+
+### Switch to Claude later
+
+When you have an Anthropic key, set it and select the Claude provider:
+
+```powershell
+$env:ANTHROPIC_API_KEY = "YOUR_ANTHROPIC_API_KEY"
+python run_fetch.py --provider claude --command "Fetch the item described here"
+```
+
+### Port and no-key options
+
+If port 8080 is busy, stop the existing service or use another local port:
+
+```powershell
+python run_fetch.py --provider groq --port 8081 --command "Fetch the item described here"
+```
+
+To check startup, camera capture, one action, and logging without a Claude key:
+
+```powershell
+python run_fetch.py --dummy --port 8081 --max-steps 1
+```
+
+Dummy mode is a plumbing check; it does not complete a fetch. JSONL logs and PNG frames are saved under `logs/`. Depth is disabled unless mentor approval is set:
+
+```powershell
+$env:FETCH_MENTOR_APPROVED_DEPTH = "true"
+```
+
+### Run the existing navigation and sensor examples
+
+Run from the repository root:
+
+```powershell
+python scripts/05_environment_builder.py warehouse
+python scripts/06_navigate_environment.py warehouse
+python scripts/03_sensor_streams.py
+```
+
+The sensor-stream visualizer runs until you press `Ctrl+C`.
+
+### Run tests
+
+```powershell
+python -m pytest -q
+```
+
 A comprehensive PyBullet-based simulation environment for a differential drive robot with sensor streams, navigation capabilities, and RL training support.
 
 ## Features

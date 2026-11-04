@@ -2,6 +2,10 @@
 """Differential drive robot controller for PyBullet."""
 import pybullet as p
 import numpy as np
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from engine import config
 
 class DiffDriveRobot:
     """Differential drive robot with sensors and control."""
@@ -36,9 +40,11 @@ class DiffDriveRobot:
         self.lidar_height = 0.11
         
         # Camera parameters
-        self.camera_width = 320
-        self.camera_height = 240
-        self.camera_fov = 60
+        self.camera_width = config.CAMERA_WIDTH
+        self.camera_height = config.CAMERA_HEIGHT_PIX
+        # PyBullet accepts vertical FOV; this produces the requested 90° horizontal view.
+        self.camera_fov = float(np.degrees(2 * np.arctan(np.tan(np.deg2rad(config.CAMERA_FOV_H / 2)) /
+                                                         (self.camera_width / self.camera_height))))
         self.camera_near = 0.01
         self.camera_far = 10.0
         
@@ -48,6 +54,7 @@ class DiffDriveRobot:
         # State
         self.last_v = 0.0
         self.last_w = 0.0
+        self.ignored_collision_bodies = set()
     
     def _find_joints(self):
         """Find wheel joint indices."""
@@ -111,6 +118,83 @@ class DiffDriveRobot:
             targetVelocity=v_r,
             force=self.max_force
         )
+
+    def stop(self):
+        """Stop both drive wheels immediately at the motor controller."""
+        self.set_velocity(0.0, 0.0)
+
+    def drive_distance(self, distance, speed=0.3, collision_check=True):
+        """Drive a signed distance in meters, stepping only for this action.
+
+        Returns actual signed travel and whether a non-floor collision stopped
+        the action. The caller owns the PyBullet client/thread.
+        """
+        distance = float(distance)
+        if distance == 0:
+            self.stop()
+            return {"moved_m": 0.0, "collided": False}
+        speed = abs(float(speed))
+        if speed == 0:
+            raise ValueError("speed must be greater than zero")
+        direction = 1.0 if distance > 0 else -1.0
+        target = abs(distance)
+        start = self.get_pose()[:2].copy()
+        start_heading = float(self.get_pose()[2])
+        self.set_velocity(direction * speed, 0.0)
+        max_steps = int(np.ceil(target / speed / config.PHYSICS_STEP * 3))
+        collided = False
+        try:
+            for _ in range(max(1, max_steps)):
+                p.stepSimulation()
+                pose = self.get_pose()
+                displacement = pose[:2] - start
+                travelled = float(np.dot(displacement, [np.cos(start_heading), np.sin(start_heading)])) * direction
+                if collision_check and self.check_collision():
+                    collided = True
+                    break
+                if travelled >= target:
+                    break
+        finally:
+            self.stop()
+        displacement = self.get_pose()[:2] - start
+        actual = max(0.0, float(np.dot(displacement, [np.cos(start_heading), np.sin(start_heading)])) * direction)
+        return {"moved_m": direction * min(actual, target), "collided": collided}
+
+    def turn_angle(self, degrees, speed_deg_s=45.0, collision_check=True):
+        """Turn by signed degrees (positive counterclockwise), stepping per action."""
+        degrees = float(degrees)
+        if degrees == 0:
+            self.stop()
+            return {"turned_deg": 0.0, "collided": False}
+        speed_deg_s = abs(float(speed_deg_s))
+        if speed_deg_s == 0:
+            raise ValueError("speed_deg_s must be greater than zero")
+        direction = 1.0 if degrees > 0 else -1.0
+        start = float(self.get_pose()[2])
+        target = abs(degrees)
+        self.set_velocity(0.0, direction * np.deg2rad(speed_deg_s))
+        max_steps = int(np.ceil(target / speed_deg_s / config.PHYSICS_STEP * 3))
+        turned = 0.0
+        collided = False
+        try:
+            for _ in range(max(1, max_steps)):
+                p.stepSimulation()
+                now = float(self.get_pose()[2])
+                turned = float(np.rad2deg((now - start + np.pi) % (2 * np.pi) - np.pi))
+                if collision_check and self.check_collision():
+                    collided = True
+                    break
+                if direction * turned >= target - 0.3:
+                    break
+        finally:
+            self.stop()
+        return {"turned_deg": turned, "collided": collided}
+        p.setJointMotorControl2(
+            self.robot_id, self.right_wheel_joint,
+            p.VELOCITY_CONTROL,
+            targetVelocity=v_r,
+            force=self.max_force
+        )
     
     def get_lidar_scan(self):
         """
@@ -161,22 +245,17 @@ class DiffDriveRobot:
                 return False
             
             for contact in contacts:
-                # Ignore ground contact
-                if contact[2] == 0:  # ground plane ID
+                # Ignore only the floor; any wall/object contact is a stop.
+                if contact[2] == 0 or contact[2] in self.ignored_collision_bodies:
                     continue
-                # Check if contact is with base (not wheels)
-                # contact[3] is link index, -1 is base link
-                if contact[3] == -1:  # base link
-                    # Check contact force - only consider significant collisions
-                    if len(contact) > 9 and contact[9] > 0.1:  # Normal force
-                        return True
+                return True
         except:
             # If we can't check contacts, assume no collision
             return False
         
         return False
     
-    def get_camera_image(self, camera_pos_offset=[0.1, 0, 0.11], look_at_offset=[1.0, 0, 0.05]):
+    def get_camera_image(self, camera_pos_offset=None, look_at_offset=None):
         """
         Get RGB and depth images from robot's camera.
         
@@ -188,8 +267,16 @@ class DiffDriveRobot:
             rgb_image: RGB image array (height, width, 3)
             depth_image: Depth image array (height, width)
         """
-        pose = self.get_pose()
         pos, orn = p.getBasePositionAndOrientation(self.robot_id)
+
+        # Mount at 0.5 m above the floor and pitch down 10 degrees in the
+        # robot's frame so the view follows turns without relying on a webcam.
+        if camera_pos_offset is None:
+            camera_pos_offset = [config.CAMERA_FORWARD, 0.0, config.CAMERA_BASE_OFFSET_Z]
+        if look_at_offset is None:
+            tilt = np.deg2rad(config.CAMERA_TILT_DEG)
+            look_at_offset = [config.CAMERA_FORWARD + np.cos(tilt), 0.0,
+                              config.CAMERA_BASE_OFFSET_Z - np.sin(tilt)]
         
         # Calculate camera position in world frame
         # Rotate offset by robot orientation
@@ -218,19 +305,25 @@ class DiffDriveRobot:
         )
         
         # Get camera image
-        _, _, rgb, depth, _ = p.getCameraImage(
-            width=self.camera_width,
-            height=self.camera_height,
-            viewMatrix=view_matrix,
-            projectionMatrix=projection_matrix,
-            renderer=p.ER_BULLET_HARDWARE_OPENGL
-        )
+        try:
+            _, _, rgb, depth, _ = p.getCameraImage(
+                width=self.camera_width, height=self.camera_height,
+                viewMatrix=view_matrix, projectionMatrix=projection_matrix,
+                renderer=p.ER_BULLET_HARDWARE_OPENGL)
+        except Exception:
+            _, _, rgb, depth, _ = p.getCameraImage(
+                width=self.camera_width, height=self.camera_height,
+                viewMatrix=view_matrix, projectionMatrix=projection_matrix,
+                renderer=p.ER_TINY_RENDERER)
         
         # Convert RGB from (H, W, 4) to (H, W, 3) and normalize
-        rgb_image = np.array(rgb)[:, :, :3]
+        rgba_image = np.asarray(rgb, dtype=np.uint8).reshape(
+            (self.camera_height, self.camera_width, 4))
+        rgb_image = rgba_image[:, :, :3]
         
         # Convert depth buffer to actual depth
-        depth_image = np.array(depth)
+        depth_image = np.asarray(depth, dtype=np.float32).reshape(
+            (self.camera_height, self.camera_width))
         depth_image = self.camera_far * self.camera_near / (self.camera_far - (self.camera_far - self.camera_near) * depth_image)
         
         return rgb_image, depth_image
