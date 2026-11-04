@@ -51,8 +51,6 @@ class PickupManager:
         base_pos, base_orn = p.getBasePositionAndOrientation(self.robot.robot_id)
         inv_pos, inv_orn = p.invertTransform(base_pos, base_orn)
         body_pos, body_orn = p.getBasePositionAndOrientation(body)
-        object_aabb = p.getAABB(body, -1)
-        object_height = object_aabb[1][2] - object_aabb[0][2]
         grasp_height = config.CARRY_OFFSET_Z
         desired_world_pos, desired_world_orn = p.multiplyTransforms(
             base_pos, base_orn,
@@ -109,9 +107,14 @@ class PickupManager:
                          spinningFriction=dynamics.get("spinningFriction", 0.0),
                          restitution=dynamics.get("restitution", 0.0))
         self._saved_dynamics = None
-        # Bounded settle advances only within the explicit drop action.
-        for _ in range(120):
-            p.stepSimulation()
-        position, _ = p.getBasePositionAndOrientation(body)
+        # Drop is instantaneous so simulation time remains frozen outside
+        # movement/turn actions. Resolve the gravity-only vertical fall to its
+        # resting floor height analytically; XY is unchanged by that fall.
+        position, orientation = p.getBasePositionAndOrientation(body)
+        lower, _ = p.getAABB(body, -1)
+        rest_position = [position[0], position[1], position[2] - lower[2] + 0.002]
+        p.resetBasePositionAndOrientation(body, rest_position, orientation)
+        p.resetBaseVelocity(body, [0, 0, 0], [0, 0, 0])
+        position = rest_position
         inside = self.environment.is_in_drop_zone(position[0], position[1])
         return True, bool(inside)

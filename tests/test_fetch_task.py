@@ -62,6 +62,17 @@ def test_seeded_room_camera_and_fixed_constraint_delivery():
         p.disconnect(client)
 
 
+def test_natural_language_target_criteria_resolve_internally():
+    client = p.connect(p.DIRECT)
+    try:
+        env = FetchEnvironment(1234).build()
+        for command in ("bring the round red object", "bring the tallest object", "bring the blue cube"):
+            selected = env.select_target(command)
+            assert selected in env.object_ids
+    finally:
+        p.disconnect(client)
+
+
 def test_pickup_angle_and_range_limits():
     client = p.connect(p.DIRECT)
     try:
@@ -96,6 +107,34 @@ def test_drop_outside_zone_fails_validation_and_keeps_carry_state():
         assert state.outcome is None
     finally:
         p.disconnect(client)
+
+
+def test_drop_zone_is_visual_only_and_drop_does_not_step_world():
+    client = p.connect(p.DIRECT)
+    try:
+        env = FetchEnvironment(11).build()
+        assert p.getCollisionShapeData(env.drop_id, -1) == ()
+        body = env.object_ids[0]
+        p.resetBasePositionAndOrientation(body, [0.4, 0.0, 0.15], [0, 0, 0, 1])
+        robot = DiffDriveRobot("urdf/diff_drive_robot.urdf", [0, 0, 0.1], 0)
+        manager = PickupManager(env, robot)
+        assert manager.pickup()
+        original_step = p.stepSimulation
+        def forbidden_step():
+            raise AssertionError("drop must not advance the simulation clock")
+        p.stepSimulation = forbidden_step
+        try:
+            manager.drop()
+        finally:
+            p.stepSimulation = original_step
+    finally:
+        p.disconnect(client)
+
+
+def test_pickup_drop_api_schemas_expose_only_validated_status():
+    schema = fetch_server.app.openapi()["components"]["schemas"]
+    assert set(schema["PickupResponse"]["properties"]) == {"success", "holding"}
+    assert set(schema["DropResponse"]["properties"]) == {"released", "in_zone", "holding"}
 
 
 def test_all_six_objects_pickup_and_reject_bad_range_or_heading():
@@ -191,6 +230,15 @@ def test_three_collision_retries_terminate():
     assert state.phase == FetchPhase.DONE
     assert state.outcome == "fail_collision"
     assert state.retry_count == 3
+
+
+def test_wrong_target_drop_in_zone_is_terminal_failure():
+    state = FetchState()
+    state.start()
+    state.picked_up(True, True)
+    state.dropped(released=True, in_zone=True, holding=False, correct_target=False)
+    assert state.phase == FetchPhase.DONE
+    assert state.outcome == "fail_wrong_object"
 
 
 def test_wall_collision_and_backoff_recovery():

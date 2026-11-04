@@ -62,6 +62,7 @@ class StateResponse(BaseModel):
     holding: bool
     retry_count: int
     collided: bool
+    outcome: str | None = None
 
 
 class MoveResponse(BaseModel):
@@ -79,12 +80,11 @@ class TurnResponse(BaseModel):
 class PickupResponse(BaseModel):
     success: bool
     holding: bool
-    state: str
 
 
 class DropResponse(BaseModel):
     released: bool
-    success: bool
+    in_zone: bool
     holding: bool
 
 
@@ -100,11 +100,16 @@ def _initialize(seed: int = 1234):
     global _started, _environment, _robot, _pickup, _state
     if _started:
         return
-    p.connect(p.DIRECT)
+    gui = os.getenv("FETCH_GUI", "false").lower() == "true"
+    p.connect(p.GUI if gui else p.DIRECT)
     _environment = FetchEnvironment(seed).build()
+    _environment.target_body_id = _environment.select_target(os.getenv("FETCH_COMMAND", ""))
     x, y, yaw = _environment.robot_start
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     _robot = DiffDriveRobot(os.path.join(base_dir, "urdf", "diff_drive_robot.urdf"), [x, y, config.ROBOT_BASE_Z], yaw)
+    if gui:
+        p.resetDebugVisualizerCamera(cameraDistance=7, cameraYaw=45, cameraPitch=-45,
+                                     cameraTargetPosition=[0, 0, 0])
     for j in (_robot.left_wheel_joint, _robot.right_wheel_joint):
         p.changeDynamics(_robot.robot_id, j, lateralFriction=1.5, spinningFriction=0.01, rollingFriction=0.01)
     _pickup = PickupManager(_environment, _robot)
@@ -125,10 +130,15 @@ def _heading_deg() -> float:
 
 
 def _collision() -> bool:
+    ignored = {_environment.floor_id, _environment.drop_id, _robot.robot_id}
     for contact in p.getContactPoints(bodyA=_robot.robot_id):
         other = contact[2]
-        if other not in (_environment.floor_id, _environment.drop_id, _pickup.held_body):
+        if other not in ignored and other != _pickup.held_body:
             return True
+    if _pickup.held_body is not None:
+        for contact in p.getContactPoints(bodyA=_pickup.held_body):
+            if contact[2] not in ignored:
+                return True
     return False
 
 
@@ -212,7 +222,8 @@ def _status():
     pose = _robot.get_pose()
     return {"state": _state.phase.value, "x": float(pose[0]), "y": float(pose[1]),
             "heading_deg": _heading_deg(), "holding": _pickup.held_body is not None,
-            "retry_count": _state.retry_count, "collided": _state.collided}
+            "retry_count": _state.retry_count, "collided": _state.collided,
+            "outcome": _state.outcome}
 
 
 def _look():
@@ -276,14 +287,13 @@ async def post_pickup():
     def action():
         _check_started()
         if _state.phase in (FetchPhase.BLOCKED, FetchPhase.DONE):
-            return {"success": False, "holding": _pickup.held_body is not None,
-                    "state": _state.phase.value}
+            return {"success": False, "holding": _pickup.held_body is not None}
         _state.phase = FetchPhase.PICKUP
         success = _pickup.pickup()
         _state.picked_up(success, _pickup.held_body is not None)
         _state.step += 1
         _check_step_limit()
-        return {"success": success, "holding": _pickup.held_body is not None, "state": _state.phase.value}
+        return {"success": success, "holding": _pickup.held_body is not None}
     return await _call(action)
 
 
@@ -292,17 +302,23 @@ async def post_drop():
     def action():
         _check_started()
         if _state.phase in (FetchPhase.BLOCKED, FetchPhase.DONE):
-            return {"released": False, "success": False, "holding": _pickup.held_body is not None}
+            return {"released": False, "in_zone": False, "holding": _pickup.held_body is not None}
         previous_phase = _state.phase
+        held_body = _pickup.held_body
         released, in_zone = _pickup.drop()
+        # An unresolved/ambiguous instruction must never be treated as a
+        # correct delivery.  The internal resolver may return None; equality
+        # then safely fails without exposing any scene details to the agent.
+        correct_target = (held_body is not None and
+                          held_body == _environment.target_body_id)
         if released:
             _state.phase = FetchPhase.DROP
         else:
             _state.phase = previous_phase
-        _state.dropped(released, in_zone, _pickup.held_body is not None)
+        _state.dropped(released, in_zone, _pickup.held_body is not None, correct_target)
         _state.step += 1
         _check_step_limit()
-        return {"released": released, "success": bool(released and in_zone),
+        return {"released": released, "in_zone": bool(released and in_zone),
                 "holding": _pickup.held_body is not None}
     return await _call(action)
 

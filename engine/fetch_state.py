@@ -44,9 +44,10 @@ class FetchState:
     def picked_up(self, success: bool, holding: bool = False):
         self.phase = FetchPhase.CARRY if success or holding else FetchPhase.LOCATE
 
-    def dropped(self, released: bool, in_zone: bool, holding: bool):
+    def dropped(self, released: bool, in_zone: bool, holding: bool, correct_target: bool = True):
         if released and in_zone:
-            self.phase, self.outcome = FetchPhase.DONE, "pass"
+            self.phase = FetchPhase.DONE
+            self.outcome = "pass" if correct_target else "fail_wrong_object"
         elif released:
             self.phase = FetchPhase.CARRY
             self.retry_count += 1
