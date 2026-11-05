@@ -22,11 +22,17 @@ def main():
     args = parser.parse_args()
     client = p.connect(p.GUI)
     try:
+        # Avoid a blank/unresponsive ExampleBrowser while the scene's many
+        # visual bodies are being created; enable rendering once it is ready.
+        p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 0)
         env = FetchEnvironment(args.seed).build()
         start = env.robot_start
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         robot = DiffDriveRobot(os.path.join(root, "urdf", "diff_drive_robot.urdf"),
                                [start[0], start[1], config.ROBOT_BASE_Z], start[2])
+        p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1)
+        p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
+        p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1)
         p.resetDebugVisualizerCamera(cameraDistance=7, cameraYaw=45, cameraPitch=-45,
                                      cameraTargetPosition=[0, 0, 0])
         print("Fetch scene preview is open. Close the PyBullet window or press Ctrl+C to exit.")

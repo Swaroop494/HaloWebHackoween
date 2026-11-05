@@ -305,11 +305,19 @@ class DiffDriveRobot:
         )
         
         # Get camera image
+        # DIRECT connections do not own a GUI OpenGL context; PyBullet can
+        # silently return only the clear color from its hardware renderer.
+        # Select Tiny Renderer explicitly there so saved frames and API vision
+        # contain actual scene pixels in headless runs as well.
+        connection = p.getConnectionInfo()
+        renderer = (p.ER_TINY_RENDERER
+                    if connection.get('connectionMethod') == p.DIRECT
+                    else p.ER_BULLET_HARDWARE_OPENGL)
         try:
             _, _, rgb, depth, _ = p.getCameraImage(
                 width=self.camera_width, height=self.camera_height,
                 viewMatrix=view_matrix, projectionMatrix=projection_matrix,
-                renderer=p.ER_BULLET_HARDWARE_OPENGL)
+                renderer=renderer)
         except Exception:
             _, _, rgb, depth, _ = p.getCameraImage(
                 width=self.camera_width, height=self.camera_height,
