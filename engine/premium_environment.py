@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import random
+from pathlib import Path
 
 import pybullet as p
 import pybullet_data
@@ -33,6 +34,13 @@ class PremiumEnvironment:
         self.safety_markings: list[int] = []
         self.wall_panel_ids: list[int] = []
         self.floor_id: int | None = None  # Initialize before use
+        texture_dir = Path(__file__).resolve().parents[1] / "assets" / "textures"
+        self.textures = {
+            name: p.loadTexture(str(texture_dir / filename)) for name, filename in {
+                "floor": "graphite_concrete.png", "wall": "warm_wall_panel.png",
+                "metal": "brushed_aluminium.png", "ceiling": "ceiling_acoustic.png",
+            }.items()
+        }
 
     def build(self) -> "PremiumEnvironment":
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
@@ -53,8 +61,10 @@ class PremiumEnvironment:
         half = self.ROOM_HALF
         floor_col = p.createCollisionShape(p.GEOM_BOX, halfExtents=[half, half, 0.02])
         floor_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[half, half, 0.02],
-                                        rgbaColor=config.PREMIUM_FLOOR_COLOR)
+                                        rgbaColor=[1, 1, 1, 1])
         self.floor_id = p.createMultiBody(0, floor_col, floor_vis, [0, 0, -0.02])
+        p.changeVisualShape(self.floor_id, -1, textureUniqueId=self.textures["floor"],
+                            specularColor=[0.12, 0.12, 0.12])
 
         # Sparse orthogonal lines give a deliberate industrial grid without moiré.
         horizontal = p.createVisualShape(p.GEOM_BOX, halfExtents=[half, 0.006, 0.0008],
@@ -84,6 +94,8 @@ class PremiumEnvironment:
             )
             self.wall_ids.append(wall_id)
             self.wall_panel_ids.append(wall_id)
+            p.changeVisualShape(wall_id, -1, textureUniqueId=self.textures["wall"],
+                                specularColor=[0.18, 0.18, 0.18])
 
             # Slim upright ribs sit flush on the room-facing wall surface.
             for offset in (-h / 3, 0.0, h / 3):
@@ -92,13 +104,28 @@ class PremiumEnvironment:
                         p.GEOM_BOX, halfExtents=[0.018, 0.035, ext[2] - 0.015],
                         rgbaColor=config.WALL_STRUCTURAL_COLOR)
                     x_face = math.copysign(h - 0.018, pos[0])
-                    p.createMultiBody(0, -1, rib_vis, [x_face, offset, pos[2]])
+                    rib_id = p.createMultiBody(0, -1, rib_vis, [x_face, offset, pos[2]])
                 else:  # North/south walls run along X.
                     rib_vis = p.createVisualShape(
                         p.GEOM_BOX, halfExtents=[0.035, 0.018, ext[2] - 0.015],
                         rgbaColor=config.WALL_STRUCTURAL_COLOR)
                     y_face = math.copysign(h - 0.018, pos[1])
-                    p.createMultiBody(0, -1, rib_vis, [offset, y_face, pos[2]])
+                    rib_id = p.createMultiBody(0, -1, rib_vis, [offset, y_face, pos[2]])
+                p.changeVisualShape(rib_id, -1, textureUniqueId=self.textures["metal"],
+                                    specularColor=[0.25, 0.25, 0.25])
+
+            # Fine recessed joints between architectural panel bays (visual only).
+            for offset in (-2.0, -1.0, 1.0, 2.0):
+                if pos[1] == 0:
+                    seam_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.002, 0.006, 0.38],
+                                                   rgbaColor=[0.24, 0.25, 0.26, 1])
+                    p.createMultiBody(0, -1, seam_vis,
+                                      [math.copysign(h - 0.051, pos[0]), offset, 0.48])
+                else:
+                    seam_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.006, 0.002, 0.38],
+                                                   rgbaColor=[0.24, 0.25, 0.26, 1])
+                    p.createMultiBody(0, -1, seam_vis,
+                                      [offset, math.copysign(h - 0.051, pos[1]), 0.48])
 
     def _make_drop_zone_with_lighting(self) -> None:
         """Create illuminated drop zone with warning markings."""
@@ -112,16 +139,18 @@ class PremiumEnvironment:
         base_vis = p.createVisualShape(
             p.GEOM_BOX,
             halfExtents=[self.DROP_HALF, self.DROP_HALF, 0.002],
-            rgbaColor=config.PREMIUM_DROP_ZONE_COLOR
+            rgbaColor=[1, 1, 1, 1]
         )
         self.drop_id = p.createMultiBody(0, -1, base_vis, [*self.drop_center, 0.002])
+        p.changeVisualShape(self.drop_id, -1, textureUniqueId=self.textures["floor"])
 
         # Illuminated border
         border_half = self.DROP_HALF + 0.05
-        border_x = p.createVisualShape(p.GEOM_BOX, halfExtents=[border_half, 0.025, 0.004],
-                                       rgbaColor=config.SAFETY_YELLOW)
-        border_y = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.025, border_half, 0.004],
-                                       rgbaColor=config.SAFETY_YELLOW)
+        border_half = self.DROP_HALF - 0.025
+        border_x = p.createVisualShape(p.GEOM_BOX, halfExtents=[self.DROP_HALF, 0.012, 0.005],
+                                       rgbaColor=config.DROP_ZONE_BORDER_PREMIUM)
+        border_y = p.createVisualShape(p.GEOM_BOX, halfExtents=[0.012, self.DROP_HALF, 0.005],
+                                       rgbaColor=config.DROP_ZONE_BORDER_PREMIUM)
         for sign in (-1, 1):
             p.createMultiBody(0, -1, border_x,
                               [self.drop_center[0], self.drop_center[1] + sign * border_half, 0.004])

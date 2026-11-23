@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import random
+from pathlib import Path
 
 import pybullet as p
 import pybullet_data
@@ -37,7 +38,6 @@ class FetchEnvironment:
         self._make_detailed_walls()
         self._make_detailed_ceiling()
         self._make_premium_drop_zone()
-        self._make_factory_obstacles()
         self._make_objects()
         self.robot_start = self._choose_robot_start()
         return self
@@ -195,7 +195,7 @@ class FetchEnvironment:
         ceiling_vis = p.createVisualShape(
             p.GEOM_BOX,
             halfExtents=[h - 0.02, h - 0.02, 0.01],
-            rgbaColor=white_ceiling
+            rgbaColor=[0.92, 0.92, 0.94, 1.0]
         )
         p.createMultiBody(0, -1, ceiling_vis, [0, 0, ceiling_height - 0.01])
         

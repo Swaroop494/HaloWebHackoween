@@ -165,12 +165,19 @@ def main():
     if client_id < 0:
         raise RuntimeError("Could not open the PyBullet GUI")
     try:
+        # Creating the textured room while the ExampleBrowser redraws every
+        # body can stall its Windows message loop. Build the scene with
+        # rendering paused, then enable the completed view before animation.
+        p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 0)
         environment = FetchEnvironment(args.seed).build()
         print("Fetch room initialized.", flush=True)
         sx, sy, heading = environment.robot_start
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         robot = DiffDriveRobot(os.path.join(root, "urdf", "diff_drive_robot.urdf"),
                                [sx, sy, config.ROBOT_BASE_Z], heading)
+        p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1)
+        p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
+        p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1)
         p.resetDebugVisualizerCamera(cameraDistance=7, cameraYaw=45, cameraPitch=-45,
                                      cameraTargetPosition=[0, 0, 0])
         # This standalone demo uses the same engine-side pickup system. It
